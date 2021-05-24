@@ -7,7 +7,8 @@ import numpy.random as npr
 
 import simpy
 
-from CC import RuntimeInfo, ExactCC, PY_MPCC
+from CC import *
+from PY_MPCC import PY_MPCC
 
 matplotlib.use('TkAgg')
 
@@ -16,22 +17,25 @@ matplotlib.use('TkAgg')
 class G:
     NUM_CLIENTS = 4
 
-    MM1 = True
+    CLIENT_MM1 = True
+    SERVER_MM1 = True
 
-    MU = 10.0
+    MU = 3.0
     MSS = 1
 
     BASE_RTT = 50.0
     TARGET_RTT = BASE_RTT + 1/MU + 10.0
 
-    SIM_TIME = 100*TARGET_RTT
+    SIM_TIME = 1000*TARGET_RTT
 
     def makeCC():
-        #rate = (G.MU - 1/(G.TARGET_RTT - G.BASE_RTT))/G.NUM_CLIENTS
-        #return ExactCC(rate, 2*rate*G.TARGET_RTT)
-
         runInfo = RuntimeInfo(0, G.BASE_RTT, 0, G.MSS)
-        return PY_MPCC(runInfo, G.MU, G.TARGET_RTT, 1.0)
+        rate = G.MU/G.NUM_CLIENTS
+        cwnd = rate*G.TARGET_RTT
+
+        return PY_MPCC(runInfo, G.MU, G.TARGET_RTT, 0.0)
+        #return AIMD(runInfo, G.MU, G.TARGET_RTT)
+        #return ExactCC(2*rate, cwnd)
 
 
 class Statistics(object):
@@ -47,7 +51,7 @@ class Statistics(object):
         for k, v in debugInfo.items():
             if k in {'time', 'rtt', 'pacingRate', 'cwnd'}:
                 continue
-            
+
             if k not in self.recs.keys():
                 self.recs[k] = []
 
@@ -65,13 +69,13 @@ class Server(object):
         self.env = env
         self.queue = []
         self.action = env.process(self.run())
-            
+
     def run(self):
         # Generate packets at rate lambda and store in queue
         while True:
             print(f"{100*self.env.now/G.SIM_TIME:.2f}%", end='\r')
-            
-            if G.MM1:
+
+            if G.SERVER_MM1:
                 t = npr.exponential(1/G.MU)
             else:
                 t = 1/G.MU
@@ -92,22 +96,22 @@ class Client(object):
         self.stats = stats
         self.server = server
         self.action = env.process(self.run())
-        
+
         self.lastRTT = 0
         self.inflight = 0
         self.cc = G.makeCC()
 
-        
+
     def run(self):
         # Generate packets at rate lambda and store in queue
         while True:
             runInfo = RuntimeInfo(self.env.now, self.lastRTT, self.inflight, G.MSS)
 
-            if G.MM1:
+            if G.CLIENT_MM1:
                 t = npr.exponential(1/self.cc.pacingRate(runInfo))
             else:
                 t = 1/self.cc.pacingRate(runInfo)
-            
+
             yield self.env.timeout(t)
 
             if self.inflight < self.cc.cwnd(runInfo):
@@ -147,7 +151,7 @@ print()
 for k in stats[0].recs.keys():
     if k == 'time':
         continue
-    
+
     print(f"{k}")
 
     for i in range(G.NUM_CLIENTS):
@@ -160,7 +164,7 @@ for k in stats[0].recs.keys():
         continue
 
     plt.figure()
-    
+
     for i in range(G.NUM_CLIENTS):
         ts = stats[i].recs['time']
         ts = np.array(ts)/G.TARGET_RTT

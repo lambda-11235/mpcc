@@ -16,13 +16,13 @@ class RuntimeInfo:
 class CongControl:
     def pacingRate(self, runInfo):
         return 1.0
-    
+
     def cwnd(self, runInfo):
         return 1
 
     def ack(self, runInfo):
         pass
-    
+
     def loss(self, runInfo):
         pass
 
@@ -34,16 +34,16 @@ class ExactCC:
     def __init__(self, pacingRate, cwnd):
         self._pacingRate = pacingRate
         self._cwnd = cwnd
-        
+
     def pacingRate(self, runInfo):
         return self._pacingRate
-    
+
     def cwnd(self, runInfo):
         return self._cwnd
 
     def ack(self, runInfo):
         pass
-    
+
     def loss(self, runInfo):
         pass
 
@@ -51,101 +51,43 @@ class ExactCC:
         return {}
 
 
-
-class PY_MPCC:
-    def __init__(self, runInfo, mu, target_rtt, w):
+class AIMD:
+    def __init__(self, runInfo, mu, targetRTT):
         self.mu = mu
-        self.target_rtt = target_rtt
-
-        self.alpha = 0.0
-        self.w = w
-
-        self.minRate = runInfo.mss/runInfo.lastRTT
+        self.targetRTT = targetRTT
 
         self.mrtt = runInfo.lastRTT
-        self.lastTime = runInfo.time
-        self.rate = self.minRate
 
-        self.ssthresh = 10*mu
-        self.resetRTTEst(runInfo)
-
-        self.rb = self.minRate
-        #self.rb = npr.exponential(G.MU/G.NUM_CLIENTS/2)
-
+        self._cwnd = 1
+        self.ssthresh = mu*targetRTT/runInfo.mss
 
     def pacingRate(self, runInfo):
-        return self.rate
-    
+        return self.mu
+
     def cwnd(self, runInfo):
-        return 2*self.rate*self.target_rtt/runInfo.mss
+        return self._cwnd
 
-    
     def ack(self, runInfo):
-        self.updateAlpha(runInfo)
-        self.updateMinRate(runInfo)
+        self.mrtt = 0.9*self.mrtt + 0.1*runInfo.lastRTT
 
-        rtt = runInfo.lastRTT
-        self.mrtt = self.wma(self.mrtt, rtt)
-
-        dt = runInfo.time - self.lastTime
-        self.lastTime = runInfo.time
-
-        self.rbComp(runInfo, dt)
-        
-        t = self.mrtt/2
-        num = self.target_rtt - self.mrtt + (1 + self.w)*t
-        den = (1 + self.w)*t
-        r = self.rb*num/den
-        self.rate = r
-
-        self.rate = min(max(self.rate, self.minRate), self.mu)
-
-        
-    def rbComp(self, runInfo, dt):
-        if self.rb < self.ssthresh and self.mrtt > self.target_rtt:
-            self.loss(runInfo)
-        elif self.rbTime > self.mrtt and self.rbInteg > 0:
-            rbEst = self.rbInteg/(self.mrtt - self.rbRTT + self.rbTime)
-
-            if self.rb < self.ssthresh:
-                self.rb = min(2*rbEst, self.ssthresh) + self.minRate
-            elif rbEst < self.rb:
-                self.rb = (self.rb + rbEst)/2
+        if self._cwnd < self.ssthresh:
+            if self.mrtt < self.targetRTT:
+                self._cwnd *= self.targetRTT/self.mrtt
+                self._cwnd = min(self._cwnd, self.ssthresh + 1)
             else:
-                self.rb += self.minRate
-            
-            self.resetRTTEst(runInfo)
+                self.ssthresh = self._cwnd/2
+        elif self.mrtt < self.targetRTT:
+            self._cwnd += 1/self._cwnd
         else:
-            self.rbInteg += self.rate*dt
-            self.rbTime += dt
+            self._cwnd *= self.targetRTT/self.mrtt
 
-        self.rb = min(max(self.rb, self.minRate), self.mu)
+        self._cwnd = max(1, self._cwnd)
 
-    
     def loss(self, runInfo):
-        rbEst = runInfo.inflight*runInfo.mss/self.mrtt
-        self.rb = min(self.rb/2, rbEst)
-        self.ssthresh = self.rb/2
+        self._cwnd /= 2
+        self._cwnd = max(1, self._cwnd)
 
-        self.resetRTTEst(runInfo)
-
-
-    def resetRTTEst(self, runInfo):
-        self.rbRTT = self.mrtt
-        self.rbInteg = 0
-        self.rbTime = 0
-
+        self.ssthresh = self._cwnd - 1
 
     def getDebugInfo(self):
-        return {'mrtt': self.mrtt, 'rb': self.rb, 'ssthresh': self.ssthresh}
-
-
-    def wma(self, avg, x):
-        return self.alpha*avg + (1 - self.alpha)*x
-
-    def updateAlpha(self, runInfo):
-        self.alpha = 0.9*(1 - 1/max(1, runInfo.inflight))
-        
-    def updateMinRate(self, runInfo):
-        self.minRate = self.mu/1024
-        #self.minRate = min(self.mu/128, runInfo.mss/self.mrtt)
+        return {'ssthresh': self.ssthresh, 'mrtt': self.mrtt}
