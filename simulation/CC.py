@@ -57,6 +57,7 @@ class AIMD:
         self.targetRTT = targetRTT
 
         self.mrtt = runInfo.lastRTT
+        self.lastTime = runInfo.time
 
         self._cwnd = 1
         self.ssthresh = mu*targetRTT/runInfo.mss
@@ -76,10 +77,13 @@ class AIMD:
                 self._cwnd = min(self._cwnd, self.ssthresh + 1)
             else:
                 self.ssthresh = self._cwnd/2
-        elif self.mrtt < self.targetRTT:
-            self._cwnd += 1/self._cwnd
-        else:
-            self._cwnd *= self.targetRTT/self.mrtt
+        elif self.lastTime + self.targetRTT < runInfo.time:
+            if self.mrtt < self.targetRTT:
+                self._cwnd += 1
+            else:
+                self._cwnd *= self.targetRTT/self.mrtt
+
+            self.lastTime = runInfo.time
 
         self._cwnd = max(1, self._cwnd)
 

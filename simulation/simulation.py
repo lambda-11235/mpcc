@@ -9,6 +9,7 @@ import simpy
 
 from CC import *
 from PY_MPCC import PY_MPCC
+from PID import PID
 
 matplotlib.use('TkAgg')
 
@@ -17,23 +18,23 @@ matplotlib.use('TkAgg')
 class G:
     NUM_CLIENTS = 4
 
-    CLIENT_MM1 = True
-    SERVER_MM1 = True
+    MM1 = True
 
-    MU = 3.0
+    MU = 30.0
     MSS = 1
 
     BASE_RTT = 50.0
     TARGET_RTT = BASE_RTT + 1/MU + 10.0
 
-    SIM_TIME = 1000*TARGET_RTT
+    SIM_TIME = 100*TARGET_RTT
 
     def makeCC():
         runInfo = RuntimeInfo(0, G.BASE_RTT, 0, G.MSS)
         rate = G.MU/G.NUM_CLIENTS
         cwnd = rate*G.TARGET_RTT
 
-        return PY_MPCC(runInfo, G.MU, G.TARGET_RTT, 0.0)
+        #return PY_MPCC(runInfo, G.MU, G.TARGET_RTT, 1.0)
+        return PID(runInfo, G.MU, G.TARGET_RTT, 2)
         #return AIMD(runInfo, G.MU, G.TARGET_RTT)
         #return ExactCC(2*rate, cwnd)
 
@@ -75,7 +76,7 @@ class Server(object):
         while True:
             print(f"{100*self.env.now/G.SIM_TIME:.2f}%", end='\r')
 
-            if G.SERVER_MM1:
+            if G.MM1:
                 t = npr.exponential(1/G.MU)
             else:
                 t = 1/G.MU
@@ -107,7 +108,7 @@ class Client(object):
         while True:
             runInfo = RuntimeInfo(self.env.now, self.lastRTT, self.inflight, G.MSS)
 
-            if G.CLIENT_MM1:
+            if G.MM1:
                 t = npr.exponential(1/self.cc.pacingRate(runInfo))
             else:
                 t = 1/self.cc.pacingRate(runInfo)

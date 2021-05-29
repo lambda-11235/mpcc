@@ -1,4 +1,7 @@
 
+import numpy as np
+import numpy.random as npr
+
 from CC import *
 
 
@@ -20,8 +23,8 @@ class PY_MPCC:
         self.ssthresh = 10*mu
         self.resetRTTEst(runInfo)
 
-        self.rb = self.minRate
-        #self.rb = npr.exponential(G.MU/G.NUM_CLIENTS/2)
+        #self.rb = self.minRate
+        self.rb = npr.exponential(self.mu)
 
 
     def pacingRate(self, runInfo):
@@ -47,11 +50,14 @@ class PY_MPCC:
 
         self.rbComp(runInfo, dt)
 
-        t = self.mrtt
-        num = (1 + self.w)*t + (self.target_rtt - self.mrtt)
-        den = (1 + self.w)*t
-        r = self.rb*num/den
-        self.rate = r
+        t = (1 + self.w)*self.target_rtt
+        num = t + (self.target_rtt - self.mrtt)
+        den = t
+        self.rate = self.rb*num/den
+
+        #delta = 2*(t*(self.rate - self.rb)
+        #           - self.rb*(self.target_rtt - self.mrtt))/t
+        #self.rate -= 1.0e-2*delta
 
         self.rate = min(max(self.rate, self.minRate), self.mu)
 
@@ -65,10 +71,13 @@ class PY_MPCC:
         if self.inSlowStart() and self.mrtt > self.target_rtt:
             self.loss(runInfo)
         elif self.rbTime > self.mrtt and self.rbInteg > 0:
-            rbEst = (self.rbInteg)/(self.rbTime + self.mrtt - self.rbRTT)
+            if self.recovery:
+                rbEst = runInfo.inflight*runInfo.mss/runInfo.lastRTT
+            else:
+                rbEst = (self.rbInteg)/(self.rbTime + self.mrtt - self.rbRTT)
 
             if self.inSlowStart():
-                self.rb = min(rbEst, self.ssthresh + self.minRate)
+                self.rb = min(2*self.rb, self.ssthresh + self.minRate)
             elif rbEst < self.rb:
                 self.rb = (self.rb + rbEst)/2
             else:
