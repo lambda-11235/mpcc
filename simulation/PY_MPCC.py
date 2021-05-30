@@ -6,36 +6,34 @@ from CC import *
 
 
 class PY_MPCC:
-    def __init__(self, runInfo, mu, target_rtt, w):
+    def __init__(self, runInfo, mu, target_rtt, w, maxRBUnder):
         self.mu = mu
         self.target_rtt = target_rtt
+        self.maxRBUnder = maxRBUnder
 
         self.alpha = 0.0
         self.w = w
 
         self.minRate = runInfo.mss/runInfo.lastRTT
 
+        self._cwnd = 1
+        self.ssthresh = self.mu*runInfo.lastRTT/runInfo.mss
+
         self.mrtt = runInfo.lastRTT
         self.lastTime = runInfo.time
-        self.rate = self.minRate
+        self.rate = self.mu
 
-        self.recovery = False
-        self.ssthresh = 10*mu
         self.resetRTTEst(runInfo)
-
-        #self.rb = self.minRate
-        self.rb = npr.exponential(self.mu)
+        self.rbUnderCnt = 0
+        self.rb = self.rate
+        #self.rb = npr.exponential(self.mu)
 
 
     def pacingRate(self, runInfo):
         return self.rate
 
     def cwnd(self, runInfo):
-        bdp = self.rate*self.target_rtt/runInfo.mss
-        if self.recovery:
-            return bdp
-        else:
-            return 2*bdp
+        return self._cwnd
 
 
     def ack(self, runInfo):
@@ -50,57 +48,67 @@ class PY_MPCC:
 
         self.rbComp(runInfo, dt)
 
-        t = (1 + self.w)*self.target_rtt
-        num = t + (self.target_rtt - self.mrtt)
-        den = t
-        self.rate = self.rb*num/den
 
-        #delta = 2*(t*(self.rate - self.rb)
-        #           - self.rb*(self.target_rtt - self.mrtt))/t
-        #self.rate -= 1.0e-2*delta
+        if self.inSlowStart():
+            if self.mrtt > self.target_rtt:
+                self.loss(runInfo)
+            else:
+                self._cwnd += 1
+                self.rate = self.mu
+        else:
+            t = (1 + self.w)*self.target_rtt
+            num = t + (self.target_rtt - self.mrtt)
+            den = t
+            self.rate = self.rb*num/den
+
+            bdp = self.rate*self.target_rtt/runInfo.mss
+            self._cwnd = 2*bdp
+
 
         self.rate = min(max(self.rate, self.minRate), self.mu)
 
 
     def rbComp(self, runInfo, dt):
-        if self.mrtt < self.target_rtt and self.recovery:
-            self.ssthresh = self.rb/2
-            self.recovery = False
-            self.resetRTTEst(runInfo)
+        if self.rbTime > self.mrtt:
+            rbEst = self.rbInteg/(self.rbTime + self.mrtt - self.rbRTT)
 
-        if self.inSlowStart() and self.mrtt > self.target_rtt:
-            self.loss(runInfo)
-        elif self.rbTime > self.mrtt and self.rbInteg > 0:
-            if self.recovery:
-                rbEst = runInfo.inflight*runInfo.mss/runInfo.lastRTT
+            # Note that rbUnderCnt implementation is slightly
+            # different than for PID.  This bacause we use rb to
+            # directly compute the rate in MPCC, while for PID it
+            # mostly accelerates convergence.
+            if self.rb < rbEst:
+                self.rbUnderCnt += 1
             else:
-                rbEst = (self.rbInteg)/(self.rbTime + self.mrtt - self.rbRTT)
+                self.rbUnderCnt = 0
 
-            if self.inSlowStart():
-                self.rb = min(2*self.rb, self.ssthresh + self.minRate)
-            elif rbEst < self.rb:
+            if self.rbUnderCnt >= self.maxRBUnder:
+                self.rb = rbEst
+            if rbEst < self.rb:
                 self.rb = (self.rb + rbEst)/2
             else:
                 self.rb += self.minRate
 
             self.resetRTTEst(runInfo)
+
+            self.rb = max(self.minRate, self.rb)
         else:
             self.rbInteg += self.rate*dt
             self.rbTime += dt
 
-        self.rb = min(max(self.rb, self.minRate), self.mu)
-
 
     def loss(self, runInfo):
+        self._cwnd /= 2
+        self.ssthresh = self._cwnd
+
         rbEst = runInfo.inflight*runInfo.mss/runInfo.lastRTT
         self.rb = rbEst
-        self.recovery = True
+        self.rate = self.rb
 
         self.resetRTTEst(runInfo)
 
 
     def inSlowStart(self):
-        return self.rb < self.ssthresh and not self.recovery
+        return self._cwnd < self.ssthresh
 
     def resetRTTEst(self, runInfo):
         self.rbRTT = self.mrtt
@@ -119,5 +127,4 @@ class PY_MPCC:
         self.alpha = 0.9*(1 - 1/max(1, runInfo.inflight))
 
     def updateMinRate(self, runInfo):
-        self.minRate = self.mu/1024
-        #self.minRate = min(self.mu/128, runInfo.mss/self.mrtt)
+        self.minRate = runInfo.mss/self.mrtt

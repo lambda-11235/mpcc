@@ -25,9 +25,7 @@ class PID:
         self.rate = self.mu
         #self.rate = npr.uniform(self.minRate, self.mu/4)
 
-        self.rbInteg = 0
-        self.rbRTT = 0
-        self.rbTime = 0
+        self.resetRTTEst(runInfo)
         self.rbUnderCnt = 0
         self.rb = self.rate
 
@@ -58,15 +56,7 @@ class PID:
 
         if self.inSlowStart():
             if self.mrtt > self.target_rtt:
-                self.ssthresh = self._cwnd/2
-
-                self.rb = runInfo.inflight*runInfo.mss/self.mrtt
-                self.rbInteg = 0
-                self.rbRTT = self.mrtt
-                self.rbTime = 0
-
-                self.rate = self.rb
-                self.integ = self.rb/self.ki
+                self.loss(runInfo)
             else:
                 self._cwnd += 1
                 self.rate = self.mu
@@ -96,15 +86,12 @@ class PID:
 
             if self.rbUnderCnt >= self.maxRBUnder:
                 self.rb = rbEst/2
-                self.rbUnderCnt = 0
             if rbEst < self.rb:
                 self.rb = (self.rb + rbEst)/2
             else:
                 self.rb += self.minRate
 
-            self.rbInteg = 0
-            self.rbRTT = self.mrtt
-            self.rbTime = 0
+            self.resetRTTEst(runInfo)
 
             self.rb = max(self.minRate, self.rb)
         else:
@@ -124,10 +111,24 @@ class PID:
 
 
     def loss(self, runInfo):
-        self.rate = self.minRate
+        self._cwnd /= 2
+        self.ssthresh = self._cwnd
+
+        self.rb = runInfo.inflight*runInfo.mss/self.mrtt
+        self.resetRTTEst(runInfo)
+
+        self.rate = self.rb
+        self.integ = self.rb/self.ki
+
 
     def inSlowStart(self):
         return self._cwnd < self.ssthresh
+
+    def resetRTTEst(self, runInfo):
+        self.rbInteg = 0
+        self.rbRTT = self.mrtt
+        self.rbTime = 0
+
 
     def getDebugInfo(self):
         return {'mrtt': self.mrtt, 'integ': self.integ,

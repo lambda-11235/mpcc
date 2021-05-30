@@ -33,7 +33,7 @@ class G:
         rate = G.MU/G.NUM_CLIENTS
         cwnd = rate*G.TARGET_RTT
 
-        #return PY_MPCC(runInfo, G.MU, G.TARGET_RTT, 1.0)
+        #return PY_MPCC(runInfo, G.MU, G.TARGET_RTT, 1.0, 32)
         return PID(runInfo, G.MU, G.TARGET_RTT, 2, 2)
         #return AIMD(runInfo, G.MU, G.TARGET_RTT)
         #return ExactCC(2*rate, cwnd)
