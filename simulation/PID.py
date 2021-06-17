@@ -9,7 +9,7 @@ class PID:
     def __init__(self, runInfo, mu, target_rtt, m, maxRBUnder):
         self.mu = mu
         self.target_rtt = target_rtt
-        self.m = m
+        self.m = max(2, m)
         self.maxRBUnder = maxRBUnder
 
         self.alpha = 0.0
@@ -19,10 +19,10 @@ class PID:
         self.minRate = runInfo.mss/runInfo.lastRTT
 
         self._cwnd = 1
-        self.ssthresh = self.mu*runInfo.lastRTT/runInfo.mss
+        self.ssthresh = 2*self.mu*runInfo.lastRTT/runInfo.mss
 
         self.integ = 0
-        self.rate = self.mu
+        self.rate = 2*self.mu
         #self.rate = npr.uniform(self.minRate, self.mu/4)
 
         self.resetRTTEst(runInfo)
@@ -59,9 +59,10 @@ class PID:
                 self.loss(runInfo)
             else:
                 self._cwnd += 1
-                self.rate = self.mu
+                self.rate = 2*self.mu
         else:
-            err = self.target_rtt - self.mrtt + self.rb - self.rate
+            err = self.target_rtt - self.mrtt
+            err += self.a*(self.rb - self.rate)
 
             self.integ += err*dt
             self.integ = min(max(0, self.integ), 2*self.mu/self.ki)
@@ -69,7 +70,7 @@ class PID:
             dedt = err/dt
             self.rate = self.kp*err + self.ki*self.integ + self.kd*dedt
 
-            self._cwnd = 2*self.rate*self.mrtt/runInfo.mss
+            self._cwnd = 2*self.rate*self.target_rtt/runInfo.mss
 
         self._cwnd = max(1, self._cwnd)
         self.rate = min(max(self.rate, self.minRate), 2*self.mu)
@@ -102,8 +103,10 @@ class PID:
     def updateParams(self):
         tau = self.m*self.target_rtt
 
-        self.kp = self.rb*(2*tau - self.rb)/(tau - self.rb)**2
-        self.ki = self.rb/(tau - self.rb)**2
+        self.a = self.target_rtt/self.mu
+        den = max(0.1, (tau - self.a*self.rb)**2)
+        self.kp = self.rb*(2*tau - self.a*self.rb)/den
+        self.ki = self.rb/den
 
         #self.kp = 2*self.rb/(tau)
         #self.ki = self.kp**2/(4*self.rb)
@@ -111,14 +114,14 @@ class PID:
 
 
     def loss(self, runInfo):
-        self._cwnd /= 2
-        self.ssthresh = self._cwnd
+        self._cwnd = runInfo.inflight*self.target_rtt/self.mrtt
+        self.ssthresh = self._cwnd/2
 
-        self.rb = runInfo.inflight*runInfo.mss/self.mrtt
+        self.rate = self._cwnd*runInfo.mss/self.target_rtt
+        self.integ = self.rate/self.ki
+
+        self.rb = self.rate
         self.resetRTTEst(runInfo)
-
-        self.rate = self.rb
-        self.integ = self.rb/self.ki
 
 
     def inSlowStart(self):

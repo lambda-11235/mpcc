@@ -73,7 +73,7 @@ class AIMD:
 
         if self._cwnd < self.ssthresh:
             if self.mrtt < self.targetRTT:
-                self._cwnd *= self.targetRTT/self.mrtt
+                self._cwnd *= 2
                 self._cwnd = min(self._cwnd, self.ssthresh + 1)
             else:
                 self.ssthresh = self._cwnd/2

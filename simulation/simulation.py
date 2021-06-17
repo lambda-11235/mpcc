@@ -16,34 +16,40 @@ matplotlib.use('TkAgg')
 
 # First  define some global variables
 class G:
-    NUM_CLIENTS = 4
+    NUM_CLIENTS = 1
 
-    MM1 = True
+    CLIENT_MARK = False
+    SERVER_MARK = True
 
-    MU = 30.0
+    MU = 30
     MSS = 1
 
     BASE_RTT = 50.0
-    TARGET_RTT = BASE_RTT + 1/MU + 10.0
+    SIGMA = 1
+    TARGET_RTT = BASE_RTT + 2*MU*SIGMA**2/(np.sqrt(4*MU**2*SIGMA**2 + 1) - 1)
+    #TARGET_RTT = BASE_RTT + 1/MU + 5
 
-    SIM_TIME = 100*TARGET_RTT
+    SIM_TIME = max(100*TARGET_RTT, 1e5*MSS/MU)
 
     def makeCC():
         runInfo = RuntimeInfo(0, G.BASE_RTT, 0, G.MSS)
-        rate = G.MU/G.NUM_CLIENTS
+        rate = G.MU - 1/(G.TARGET_RTT - G.BASE_RTT)
         cwnd = rate*G.TARGET_RTT
 
-        #return PY_MPCC(runInfo, G.MU, G.TARGET_RTT, 1.0, 32)
-        return PID(runInfo, G.MU, G.TARGET_RTT, 2, 2)
+        return PY_MPCC(runInfo, G.MU, G.TARGET_RTT, 8)
+        #return PID(runInfo, G.MU, G.TARGET_RTT, 2, 2)
         #return AIMD(runInfo, G.MU, G.TARGET_RTT)
-        #return ExactCC(2*rate, cwnd)
+        #return ExactCC(rate, 1e6*cwnd)
 
 
 class Statistics(object):
     def __init__(self):
+        self.delivered = 0
         self.recs = {'time': [], 'rtt': [], 'pacingRate': [], 'cwnd': []}
 
     def update(self, time, rtt, pacingRate, cwnd, debugInfo):
+        self.delivered += 1
+        
         self.recs['time'].append(time)
         self.recs['rtt'].append(rtt)
         self.recs['pacingRate'].append(pacingRate)
@@ -76,7 +82,7 @@ class Server(object):
         while True:
             print(f"{100*self.env.now/G.SIM_TIME:.2f}%", end='\r')
 
-            if G.MM1:
+            if G.SERVER_MARK:
                 t = npr.exponential(1/G.MU)
             else:
                 t = 1/G.MU
@@ -108,7 +114,7 @@ class Client(object):
         while True:
             runInfo = RuntimeInfo(self.env.now, self.lastRTT, self.inflight, G.MSS)
 
-            if G.MM1:
+            if G.CLIENT_MARK:
                 t = npr.exponential(1/self.cc.pacingRate(runInfo))
             else:
                 t = 1/self.cc.pacingRate(runInfo)
@@ -149,6 +155,11 @@ env.run(until=G.SIM_TIME)
 print()
 
 
+print("Mean Throughput")
+for i in range(G.NUM_CLIENTS):
+    throughput = stats[i].delivered/G.SIM_TIME
+    print(f"\tClient {i}:\t{throughput:.3e}")
+    
 for k in stats[0].recs.keys():
     if k == 'time':
         continue
