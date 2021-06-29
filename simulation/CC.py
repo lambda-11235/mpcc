@@ -73,10 +73,11 @@ class AIMD:
 
         if self._cwnd < self.ssthresh:
             if self.mrtt < self.targetRTT:
-                self._cwnd *= 2
+                self._cwnd += 1
                 self._cwnd = min(self._cwnd, self.ssthresh + 1)
             else:
                 self.ssthresh = self._cwnd/2
+                self.lastTime = runInfo.time
         elif self.lastTime + self.targetRTT < runInfo.time:
             if self.mrtt < self.targetRTT:
                 self._cwnd += 1

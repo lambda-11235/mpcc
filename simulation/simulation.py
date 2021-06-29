@@ -16,27 +16,27 @@ matplotlib.use('TkAgg')
 
 # First  define some global variables
 class G:
-    NUM_CLIENTS = 1
+    NUM_CLIENTS = 4
 
     CLIENT_MARK = False
     SERVER_MARK = True
 
-    MU = 30
+    MU = 100
     MSS = 1
 
-    BASE_RTT = 50.0
+    BASE_RTT = 5.0
     SIGMA = 1
-    TARGET_RTT = BASE_RTT + 2*MU*SIGMA**2/(np.sqrt(4*MU**2*SIGMA**2 + 1) - 1)
-    #TARGET_RTT = BASE_RTT + 1/MU + 5
+    #TARGET_RTT = BASE_RTT + 2*MU*SIGMA**2/(np.sqrt(4*MU**2*SIGMA**2 + 1) - 1)
+    TARGET_RTT = BASE_RTT + 1/MU + 5
 
-    SIM_TIME = max(100*TARGET_RTT, 1e5*MSS/MU)
+    SIM_TIME = max(1000*TARGET_RTT, 1e5*MSS/MU)
 
     def makeCC():
         runInfo = RuntimeInfo(0, G.BASE_RTT, 0, G.MSS)
         rate = G.MU - 1/(G.TARGET_RTT - G.BASE_RTT)
         cwnd = rate*G.TARGET_RTT
 
-        return PY_MPCC(runInfo, G.MU, G.TARGET_RTT, 8)
+        return PY_MPCC(runInfo, G.MU, G.TARGET_RTT, G.BASE_RTT)
         #return PID(runInfo, G.MU, G.TARGET_RTT, 2, 2)
         #return AIMD(runInfo, G.MU, G.TARGET_RTT)
         #return ExactCC(rate, 1e6*cwnd)
@@ -154,6 +154,9 @@ clients = [Client(env, stats[i], server) for i in range(G.NUM_CLIENTS)]
 env.run(until=G.SIM_TIME)
 print()
 
+
+print(f"Base RTT: {G.BASE_RTT}")
+print(f"Target RTT: {G.TARGET_RTT}")
 
 print("Mean Throughput")
 for i in range(G.NUM_CLIENTS):
