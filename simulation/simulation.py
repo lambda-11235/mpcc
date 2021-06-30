@@ -26,8 +26,10 @@ class G:
 
     BASE_RTT = 5.0
     SIGMA = 1
-    #TARGET_RTT = BASE_RTT + 2*MU*SIGMA**2/(np.sqrt(4*MU**2*SIGMA**2 + 1) - 1)
-    TARGET_RTT = BASE_RTT + 1/MU + 5
+    TARGET_RTT = BASE_RTT + 2*MU*SIGMA**2/(np.sqrt(4*MU**2*SIGMA**2 + 1) - 1)
+    #TARGET_RTT = BASE_RTT + 1/MU + 5
+
+    MAX_PACKETS = 1000*MU*TARGET_RTT/MSS
 
     SIM_TIME = max(1000*TARGET_RTT, 1e5*MSS/MU)
 
@@ -45,12 +47,13 @@ class G:
 class Statistics(object):
     def __init__(self):
         self.delivered = 0
-        self.recs = {'time': [], 'rtt': [], 'pacingRate': [], 'cwnd': []}
+        self.recs = {'time': [], 'losses': [], 'rtt': [], 'pacingRate': [], 'cwnd': []}
 
-    def update(self, time, rtt, pacingRate, cwnd, debugInfo):
+    def update(self, time, losses, rtt, pacingRate, cwnd, debugInfo):
         self.delivered += 1
-        
+
         self.recs['time'].append(time)
+        self.recs['losses'].append(losses)
         self.recs['rtt'].append(rtt)
         self.recs['pacingRate'].append(pacingRate)
         self.recs['cwnd'].append(cwnd)
@@ -94,7 +97,10 @@ class Server(object):
                 p.client.ack(p)
 
     def send(self, packet):
-        self.queue.append(packet)
+        if len(self.queue) >= G.MAX_PACKETS:
+            packet.client.loss()
+        else:
+            self.queue.append(packet)
 
 
 class Client(object):
@@ -104,6 +110,7 @@ class Client(object):
         self.server = server
         self.action = env.process(self.run())
 
+        self.losses = 0
         self.lastRTT = 0
         self.inflight = 0
         self.cc = G.makeCC()
@@ -134,7 +141,20 @@ class Client(object):
         runInfo = RuntimeInfo(self.env.now, self.lastRTT, self.inflight, G.MSS)
         self.cc.ack(runInfo)
 
-        self.stats.update(self.env.now, self.lastRTT,
+        self.stats.update(self.env.now, self.losses, self.lastRTT,
+                          self.cc.pacingRate(runInfo),
+                          self.cc.cwnd(runInfo),
+                          self.cc.getDebugInfo())
+
+
+    def loss(self):
+        self.inflight -= 1
+        self.losses += 1
+
+        runInfo = RuntimeInfo(self.env.now, self.lastRTT, self.inflight, G.MSS)
+        self.cc.loss(runInfo)
+
+        self.stats.update(self.env.now, self.losses, self.lastRTT,
                           self.cc.pacingRate(runInfo),
                           self.cc.cwnd(runInfo),
                           self.cc.getDebugInfo())
@@ -162,7 +182,7 @@ print("Mean Throughput")
 for i in range(G.NUM_CLIENTS):
     throughput = stats[i].delivered/G.SIM_TIME
     print(f"\tClient {i}:\t{throughput:.3e}")
-    
+
 for k in stats[0].recs.keys():
     if k == 'time':
         continue

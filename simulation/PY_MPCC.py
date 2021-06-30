@@ -17,7 +17,6 @@ class PY_MPCC:
 
         self.bdp = 1
         self._cwnd = 1
-        self.ssthresh = 0#2*self.maxRate*runInfo.lastRTT/runInfo.mss
 
         self.mrtt = runInfo.lastRTT
         self.devRTT = 0
@@ -26,8 +25,11 @@ class PY_MPCC:
         self.ref = self.target_rtt
         self.predRTT = self.mrtt
         self.err = 0
-        #self.rate = 2*self.maxRate
-        self.rate = npr.uniform(self.minRate, self.maxRate/4)
+        self.rate = self.minRate
+        #self.rate = npr.uniform(self.minRate, self.maxRate/4)
+
+        self.ssthresh = self.maxRate
+        self.recovery = False
 
         self.mu = self.rate
         self.muInteg = 0
@@ -51,25 +53,26 @@ class PY_MPCC:
         self.mrtt = self.wma(self.mrtt, rtt)
         self.devRTT = self.wma(self.devRTT, abs(rtt - self.mrtt))
 
+        if self.mrtt > 2*self.target_rtt:
+            self.loss(runInfo)
+        elif self.mrtt > self.target_rtt:
+            self.ssthresh = min(self.ssthresh, self.mu/4)
+
         self.updateMU(runInfo)
 
-        if self.inSlowStart():
-            if self.mrtt > self.target_rtt:
-                self.loss(runInfo)
-            elif runInfo.time > self.lastTime + self.target_rtt:
-                self.lastTime = runInfo.time
-
-                self.bdp = self._cwnd
-                self._cwnd *= 2
-                self.rate = 2*self._cwnd*runInfo.mss/self.target_rtt
-        elif runInfo.time > self.lastTime + self.target_rtt:
+        if runInfo.time > self.lastTime + self.target_rtt:
             self.lastTime = runInfo.time
+            self.ssthresh += self.minRate
 
-            a = 0.9
-            self.err = a*self.err + (1 - a)*(self.mrtt - self.predRTT)
-            ref = a*self.mrtt + (1 - a)*self.target_rtt
+            if self.mu < self.ssthresh and not self.recovery:
+                self.ref = 2*self.target_rtt
+                self.err = 0
+            else:
+                a = 0.9
+                self.err = a*self.err + (1 - a)*(self.mrtt - self.predRTT)
+                self.ref = a*self.mrtt + (1 - a)*self.target_rtt
 
-            num = self.target_rtt - self.err + ref - self.mrtt
+            num = self.target_rtt - self.err + self.ref - self.mrtt
             den = self.target_rtt
             self.rate = num/den*self.mu
 
@@ -87,21 +90,16 @@ class PY_MPCC:
 
 
     def loss(self, runInfo):
-        self._cwnd = 0.9*self.bdp
-        self.ssthresh = self._cwnd/2
-
-        self.lastTime = runInfo.time
-        self.rate = self._cwnd*runInfo.mss/self.target_rtt
-
-        self._cwnd = max(1, self._cwnd)
-        self.rate = min(max(self.rate, self.minRate), 2*self.maxRate)
-
-        self.mu = self.rate
-        self.resetMUEst(runInfo)
+        self.rate = self.mu/2
+        self.ssthresh = min(self.ssthresh, self.mu/4)
+        self.recovery = True
 
 
     def updateMU(self, runInfo):
-        if self.muTime > 4*(self.target_rtt + self.devRTT) or self.mrtt > 2*self.target_rtt:
+        cond1 = self.muTime > 4*(self.target_rtt + self.devRTT)
+        cond2 = self.muTime > self.target_rtt and self.mrtt > 2*self.target_rtt
+
+        if cond1 or cond2:
             est = self.muInteg/(self.muTime + self.mrtt - self.muRTT)
             #est = runInfo.inflight*runInfo.mss/runInfo.lastRTT
 
@@ -125,10 +123,6 @@ class PY_MPCC:
         self.muRTT = self.mrtt
         self.muTime = 0
         self.muLastTime = runInfo.time
-
-
-    def inSlowStart(self):
-        return self._cwnd < self.ssthresh
 
 
     def getDebugInfo(self):
