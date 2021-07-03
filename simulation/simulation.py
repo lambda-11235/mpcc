@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -8,6 +9,7 @@ import numpy.random as npr
 import simpy
 
 from CC import *
+from MPCC import MPCC
 from PY_MPCC import PY_MPCC
 from PID import PID
 
@@ -21,10 +23,10 @@ class G:
     CLIENT_MARK = False
     SERVER_MARK = True
 
-    MU = 100
-    MSS = 1
+    MSS = 1500
+    MU = 10*MSS
 
-    BASE_RTT = 5.0
+    BASE_RTT = 50.0
     SIGMA = 1
     TARGET_RTT = BASE_RTT + 2*MU*SIGMA**2/(np.sqrt(4*MU**2*SIGMA**2 + 1) - 1)
     #TARGET_RTT = BASE_RTT + 1/MU + 5
@@ -38,7 +40,8 @@ class G:
         rate = G.MU - 1/(G.TARGET_RTT - G.BASE_RTT)
         cwnd = rate*G.TARGET_RTT
 
-        return PY_MPCC(runInfo, G.MU, G.TARGET_RTT, G.BASE_RTT)
+        return MPCC(runInfo, G.MU, G.TARGET_RTT)
+        #return PY_MPCC(runInfo, G.MU, G.TARGET_RTT)
         #return PID(runInfo, G.MU, G.TARGET_RTT, 2, 2)
         #return AIMD(runInfo, G.MU, G.TARGET_RTT)
         #return ExactCC(rate, 1e6*cwnd)
@@ -86,9 +89,9 @@ class Server(object):
             print(f"{100*self.env.now/G.SIM_TIME:.2f}%", end='\r')
 
             if G.SERVER_MARK:
-                t = npr.exponential(1/G.MU)
+                t = npr.exponential(G.MSS/G.MU)
             else:
-                t = 1/G.MU
+                t = G.MSS/G.MU
 
             yield self.env.timeout(t)
 
@@ -122,9 +125,9 @@ class Client(object):
             runInfo = RuntimeInfo(self.env.now, self.lastRTT, self.inflight, G.MSS)
 
             if G.CLIENT_MARK:
-                t = npr.exponential(1/self.cc.pacingRate(runInfo))
+                t = npr.exponential(G.MSS/self.cc.pacingRate(runInfo))
             else:
-                t = 1/self.cc.pacingRate(runInfo)
+                t = G.MSS/self.cc.pacingRate(runInfo)
 
             yield self.env.timeout(t)
 

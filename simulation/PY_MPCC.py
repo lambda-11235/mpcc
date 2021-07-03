@@ -5,30 +5,36 @@ import numpy.random as npr
 from CC import *
 
 
-class PY_MPCC:
-    def __init__(self, runInfo, mu, target_rtt, base_rtt):
-        self.maxRate = mu
-        self.target_rtt = target_rtt
-        self.T = target_rtt
+def wma(avg, x):
+    return (9*avg + x)/10
 
-        self.alpha = 0.0
+def clamp(x, minimum, maximum):
+    if x < minimum:
+        return minimum
+    elif x > maximum:
+        return maximum
+    else:
+        return x
+
+
+class PY_MPCC:
+    def __init__(self, runInfo, bottleneckRate, targetRTT):
+        self.bottleneckRate = bottleneckRate
+        self.targetRTT = targetRTT
 
         self.minRate = runInfo.mss/runInfo.lastRTT
-
-        self.bdp = 1
-        self._cwnd = 1
 
         self.mrtt = runInfo.lastRTT
         self.devRTT = 0
         self.lastTime = runInfo.time
 
-        self.ref = self.target_rtt
+        self.ref = self.targetRTT
         self.predRTT = self.mrtt
         self.err = 0
         self.rate = self.minRate
-        #self.rate = npr.uniform(self.minRate, self.maxRate/4)
+        #self.rate = npr.uniform(self.minRate, self.bottleneckRate/4)
 
-        self.ssthresh = self.maxRate
+        self.ssthresh = self.bottleneckRate
         self.recovery = False
 
         self.mu = self.rate
@@ -42,51 +48,47 @@ class PY_MPCC:
         return self.rate
 
     def cwnd(self, runInfo):
-        return self._cwnd
+        return 2*self.rate*self.mrtt/runInfo.mss
 
 
     def ack(self, runInfo):
-        self.updateAlpha(runInfo)
-        self.updateMinRate(runInfo)
+        self.minRate = wma(self.minRate, runInfo.mss/runInfo.lastRTT)
 
         rtt = runInfo.lastRTT
-        self.mrtt = self.wma(self.mrtt, rtt)
-        self.devRTT = self.wma(self.devRTT, abs(rtt - self.mrtt))
+        if runInfo.inflight < 8:
+            self.mrtt = rtt
+        else:
+            self.mrtt = wma(self.mrtt, rtt)
 
-        if self.mrtt > 2*self.target_rtt:
+        self.devRTT = wma(self.devRTT, abs(rtt - self.mrtt))
+
+
+        if self.mrtt > 2*self.targetRTT:
             self.loss(runInfo)
-        elif self.mrtt > self.target_rtt:
+        elif self.mrtt > self.targetRTT:
             self.ssthresh = min(self.ssthresh, self.mu/4)
 
         self.updateMU(runInfo)
 
-        if runInfo.time > self.lastTime + self.target_rtt:
+        if runInfo.time > self.lastTime + self.targetRTT:
             self.lastTime = runInfo.time
             self.ssthresh += self.minRate
 
             if self.mu < self.ssthresh and not self.recovery:
-                self.ref = 2*self.target_rtt
+                self.ref = 2*self.targetRTT
                 self.err = 0
             else:
-                a = 0.9
-                self.err = a*self.err + (1 - a)*(self.mrtt - self.predRTT)
-                self.ref = a*self.mrtt + (1 - a)*self.target_rtt
+                self.err = wma(self.err, self.mrtt - self.predRTT)
+                self.ref = wma(self.mrtt, self.targetRTT)
 
-            num = self.target_rtt - self.err + self.ref - self.mrtt
-            den = self.target_rtt
-            self.rate = num/den*self.mu
+            num = self.targetRTT - self.err + self.ref - self.mrtt
+            den = self.targetRTT
+            self.rate = (num*self.mu)/den
 
-            self.predRTT = self.mrtt + self.target_rtt*(self.rate - self.mu)/self.mu
-
-            self.bdp = self.rate*self.target_rtt/runInfo.mss
-            self._cwnd = 2*self.bdp
-
-            if self.mrtt > self.target_rtt:
-                self.ssthresh = min(self.ssthresh, self.bdp)
+            self.predRTT = self.mrtt + self.targetRTT*(self.rate - self.mu)/self.mu
 
 
-        self._cwnd = max(1, self._cwnd)
-        self.rate = min(max(self.rate, self.minRate), 2*self.maxRate)
+        self.rate = clamp(self.rate, self.minRate, 2*self.bottleneckRate)
 
 
     def loss(self, runInfo):
@@ -96,8 +98,8 @@ class PY_MPCC:
 
 
     def updateMU(self, runInfo):
-        cond1 = self.muTime > 4*(self.target_rtt + self.devRTT)
-        cond2 = self.muTime > self.target_rtt and self.mrtt > 2*self.target_rtt
+        cond1 = self.muTime > 4*(self.targetRTT + self.devRTT)
+        cond2 = self.muTime > self.targetRTT and self.mrtt > 2*self.targetRTT
 
         if cond1 or cond2:
             est = self.muInteg/(self.muTime + self.mrtt - self.muRTT)
@@ -109,7 +111,8 @@ class PY_MPCC:
             self.mu = est
 
             self.resetMUEst(runInfo)
-            self.mu = min(max(runInfo.mss/runInfo.lastRTT, self.mu), 2*self.maxRate)
+            self.mu = clamp(self.mu, runInfo.mss/runInfo.lastRTT,
+                            2*self.bottleneckRate)
         else:
             dt = runInfo.time - self.muLastTime
             self.muLastTime = runInfo.time
@@ -131,13 +134,3 @@ class PY_MPCC:
                 'err': self.err,
                 'rtt_ref': self.ref,
                 'ssthresh': self.ssthresh}
-
-
-    def wma(self, avg, x):
-        return self.alpha*avg + (1 - self.alpha)*x
-
-    def updateAlpha(self, runInfo):
-        self.alpha = 0.9*(1 - 1/max(1, runInfo.inflight))
-
-    def updateMinRate(self, runInfo):
-        self.minRate = runInfo.mss/self.mrtt
