@@ -11,6 +11,7 @@ import simpy
 from CC import *
 from MPCC import MPCC
 from PY_MPCC import PY_MPCC
+from CPID import CPID
 from PID import PID
 
 matplotlib.use('TkAgg')
@@ -20,29 +21,31 @@ matplotlib.use('TkAgg')
 class G:
     NUM_CLIENTS = 4
 
-    CLIENT_MARK = False
+    CLIENT_MARK = True
     SERVER_MARK = True
 
     MSS = 1500
     MU = 10*MSS
 
-    BASE_RTT = 50.0
+    BASE_RTT = 500.0
     SIGMA = 1
     TARGET_RTT = BASE_RTT + 2*MU*SIGMA**2/(np.sqrt(4*MU**2*SIGMA**2 + 1) - 1)
     #TARGET_RTT = BASE_RTT + 1/MU + 5
 
-    MAX_PACKETS = 1000*MU*TARGET_RTT/MSS
+    MAX_PACKETS = MU*TARGET_RTT/MSS
 
-    SIM_TIME = max(1000*TARGET_RTT, 1e5*MSS/MU)
+    SIM_TIME = 1000*TARGET_RTT
+    START_TIME_OFFSETS = 0#SIM_TIME/(2*NUM_CLIENTS)
 
     def makeCC():
         runInfo = RuntimeInfo(0, G.BASE_RTT, 0, G.MSS)
         rate = G.MU - 1/(G.TARGET_RTT - G.BASE_RTT)
         cwnd = rate*G.TARGET_RTT
 
-        return MPCC(runInfo, G.MU, G.TARGET_RTT)
+        #return MPCC(runInfo, G.MU, G.TARGET_RTT)
         #return PY_MPCC(runInfo, G.MU, G.TARGET_RTT)
-        #return PID(runInfo, G.MU, G.TARGET_RTT, 2, 2)
+        return CPID(runInfo, G.MU, G.TARGET_RTT)
+        #return PID(runInfo, G.MU, G.TARGET_RTT)
         #return AIMD(runInfo, G.MU, G.TARGET_RTT)
         #return ExactCC(rate, 1e6*cwnd)
 
@@ -167,13 +170,32 @@ class Client(object):
         yield self.env.timeout(G.BASE_RTT)
         self.server.send(packet)
 
+    def __init__(self, env, stats, server):
+        self.env = env
+        self.stats = stats
+        self.server = server
+        self.action = env.process(self.run())
+
+        self.losses = 0
+        self.lastRTT = 0
+        self.inflight = 0
+        self.cc = G.makeCC()
+
 
 env = simpy.Environment()
 stats = [Statistics() for _ in range(G.NUM_CLIENTS)]
 
-server = Server(env)
-clients = [Client(env, stats[i], server) for i in range(G.NUM_CLIENTS)]
+def startup(env):
+    server = Server(env)
 
+    for i in range(G.NUM_CLIENTS):
+        clients = Client(env, stats[i], server)
+        yield env.timeout(G.START_TIME_OFFSETS)
+
+    while True:
+        yield env.timeout(G.SIM_TIME)
+
+env.process(startup(env))
 env.run(until=G.SIM_TIME)
 print()
 
@@ -211,10 +233,10 @@ for k in stats[0].recs.keys():
 
         plt.plot(ts, vs, label=f"Client {i}")
 
-    if k == 'rtt':
+    if k in {'rtt', 'mrtt'}:
         plt.plot((0, G.SIM_TIME/G.TARGET_RTT), (G.TARGET_RTT, G.TARGET_RTT),
                  'k--', label='Target RTT')
-    elif k in {'pacingRate', 'rb'}:
+    elif k in {'pacingRate', 'mu', 'ssthresh', 'integ'}:
         plt.plot((0, G.SIM_TIME/G.TARGET_RTT), (G.MU, G.MU),
                  'k--', label='mu')
         plt.plot((0, G.SIM_TIME/G.TARGET_RTT), (G.MU/G.NUM_CLIENTS, G.MU/G.NUM_CLIENTS),
@@ -222,6 +244,7 @@ for k in stats[0].recs.keys():
 
     plt.xlabel("Time (Target RTTs)")
     plt.ylabel(k)
+    plt.grid()
     plt.legend()
 
     plt.savefig(f"figures/{k}.png")

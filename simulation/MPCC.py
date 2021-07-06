@@ -2,6 +2,8 @@
 import numpy as np
 import numpy.random as npr
 
+import math
+
 from CC import *
 import _mpcc
 
@@ -10,10 +12,10 @@ def convertRunInfo(runInfo):
     info = _mpcc.ffi.new("struct runtime_info*")
 
     if _mpcc.ffi.typeof('SNum').cname == 'int64_t':
-        info.time = np.ceil(runInfo.time)
-        info.lastRTT = np.ceil(runInfo.lastRTT)
-        info.inflight = np.ceil(runInfo.inflight)
-        info.mss = np.ceil(runInfo.mss)
+        info.time = math.ceil(runInfo.time)
+        info.lastRTT = math.ceil(runInfo.lastRTT)
+        info.inflight = math.ceil(runInfo.inflight)
+        info.mss = math.ceil(runInfo.mss)
     else:
         info.time = runInfo.time
         info.lastRTT = runInfo.lastRTT
