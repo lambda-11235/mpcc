@@ -55,6 +55,7 @@ class AIMD:
     def __init__(self, runInfo, mu, targetRTT):
         self.mu = mu
         self.targetRTT = targetRTT
+        self.minInc = min(1, 1.0e-3*self.mu*self.targetRTT/runInfo.mss)
 
         self.mrtt = runInfo.lastRTT
         self.lastTime = runInfo.time
@@ -63,12 +64,19 @@ class AIMD:
         self.ssthresh = mu*targetRTT/runInfo.mss
 
     def pacingRate(self, runInfo):
-        return self.mu
+        if self._cwnd > 1:
+            return self.mu
+        else:
+            return self._cwnd*runInfo.mss/self.targetRTT
 
     def cwnd(self, runInfo):
-        return self._cwnd
+        if self._cwnd > 1:
+            return self._cwnd
+        else:
+            return 1
 
     def ack(self, runInfo):
+        self.minInc = min(1, 1.0e-3*self.mu*self.targetRTT/runInfo.mss)
         self.mrtt = 0.9*self.mrtt + 0.1*runInfo.lastRTT
 
         if self._cwnd < self.ssthresh:
@@ -80,17 +88,17 @@ class AIMD:
                 self.lastTime = runInfo.time
         elif self.lastTime + self.targetRTT < runInfo.time:
             if self.mrtt < self.targetRTT:
-                self._cwnd += 1
+                self._cwnd += self.minInc
             else:
                 self._cwnd *= self.targetRTT/self.mrtt
 
             self.lastTime = runInfo.time
 
-        self._cwnd = max(1, self._cwnd)
+        self._cwnd = max(self.minInc, self._cwnd)
 
     def loss(self, runInfo):
         self._cwnd /= 2
-        self._cwnd = max(1, self._cwnd)
+        self._cwnd = max(self.minInc, self._cwnd)
 
         self.ssthresh = self._cwnd - 1
 

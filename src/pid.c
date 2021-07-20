@@ -53,42 +53,49 @@ void pid_release(struct pid *self) {
 
 
 void pid_reset(struct pid *self, struct runtime_info *info) {
-        self->minRate = pid_max(minDelta, info->mss*US_PER_SEC/info->lastRTT);
-        self->minRTT = info->lastRTT;
+    self->startup = true;
+    
+    self->minRate = pid_max(minDelta, info->mss*US_PER_SEC/info->lastRTT);
+    self->minRTT = info->lastRTT;
 
-        self->mrtt = info->lastRTT;
-        self->devRTT = 0;
-        self->lastTime = info->time;
+    self->mrtt = info->lastRTT;
+    self->devRTT = 0;
+    self->lastTime = info->time;
 
-        self->integ = self->minRate;
-        self->lastErr = 0;
-        self->rate = self->minRate;
+    self->integ = self->minRate;
+    self->lastErr = 0;
+    self->rate = self->minRate;
 
-        self->mu = self->cfg.bottleneckRate;
-        self->muACKed = 0;
-        self->muTime = info->time;
+    self->mu = self->cfg.bottleneckRate;
+    self->muACKed = 0;
+    self->muTime = info->time;
 }
 
 
 
 SNum pid_pacing_rate(struct pid *self, struct runtime_info *info) {
-    //printf("%f\n", (double) self->rate/(double) self->cfg.bottleneckRate);
     return self->rate;
 }
 
 
 SNum pid_cwnd(struct pid *self, struct runtime_info *info) {
-    //printf("%ld\n", self->_cwnd);
-    return pid_max(1, 2*self->rate*self->mrtt/(info->mss*US_PER_SEC));
+    SNum bdp = self->mu*self->cfg.targetRTT/(info->mss*US_PER_SEC);
+
+    if (self->startup)
+        return bdp + 4;
+    else
+        return pid_max(1, 2*bdp);
 }
 
 
 void pid_on_ack(struct pid *self, struct runtime_info *info) {
-    SNum dt, err, est, tau, upper;
+    SNum dt, err, est, tau, updatePeriod;
     SNum kpNum, kpDen, kiNum, kiDen;
-    SNum integDelta;
 
-    self->minRate = pid_max(minDelta, info->mss*US_PER_SEC/self->cfg.targetRTT);
+    self->minRate = pid_min(self->cfg.bottleneckRate/128,
+                            info->mss*US_PER_SEC/self->cfg.targetRTT);
+    self->minRate = pid_max(minDelta, self->minRate);
+
     self->minRTT = pid_min(self->minRTT, info->lastRTT);
 
     if (info->inflight < 8)
@@ -115,14 +122,14 @@ void pid_on_ack(struct pid *self, struct runtime_info *info) {
     }
 
 
+    if (self->mrtt > self->cfg.targetRTT)
+        self->startup = false;
+    
     err = self->cfg.targetRTT - self->mrtt;
     tau = 4*self->cfg.targetRTT;
 
-    if (self->mrtt < self->cfg.targetRTT - 8*self->devRTT) {
-        upper = self->cfg.targetRTT - US_PER_SEC*info->inflight*info->mss/self->mu;
-        err = pid_max(err, upper);
-    }
-
+    if (self->startup)
+        err = err*self->cfg.targetRTT/pid_max(minDelta, self->cfg.targetRTT - self->minRTT);
 
     kpNum = 2*self->mu;
     kpDen = tau;
@@ -130,13 +137,15 @@ void pid_on_ack(struct pid *self, struct runtime_info *info) {
     kiNum = self->mu;
     kiDen = pid_sqr(tau);
 
-    dt = info->time - self->lastTime;
-    integDelta = kiNum*err*dt/kiDen;
-    //printf("%ld = %ld*%ld*%ld/%ld\n", integDelta, kiNum, err, dt, kiDen);
 
-    if (pid_abs(integDelta) > 0) {
-        self->integ += integDelta;
-        self->integ += self->minRate*dt/tau/10;
+    updatePeriod = 10*kiDen/pid_max(minDelta, kiNum*pid_abs(err));
+    //printf("%ld, %ld\n", updatePeriod, self->mrtt);
+
+    dt = info->time - self->lastTime;
+
+    if (dt > updatePeriod) {
+        self->integ += kiNum*err*dt/kiDen;
+        self->integ += self->minRate*self->cfg.targetRTT*dt/pid_sqr(tau);
 
         self->rate = kpNum*err/kpDen + self->integ;
         self->lastTime = info->time;
@@ -148,6 +157,7 @@ void pid_on_ack(struct pid *self, struct runtime_info *info) {
 
 
 void pid_on_loss(struct pid *self, struct runtime_info *info) {
+    self->startup = false;
     self->integ = self->mu/2;
     self->rate = self->minRate;
 }

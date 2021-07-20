@@ -29,6 +29,7 @@ class PID:
         self.devRTT = 0
         self.lastTime = runInfo.time
 
+        self.startup = True
         self.integ = self.minRate
         self.rate = self.minRate
 
@@ -41,11 +42,16 @@ class PID:
         return self.rate
 
     def cwnd(self, runInfo):
-        return 2*self.rate*self.mrtt/runInfo.mss
+        bdp = int(self.rate*self.targetRTT/runInfo.mss)
+
+        if True:#self.startup:
+            return max(1, bdp)
+        else:
+            return max(1, 2*bdp)
 
 
     def ack(self, runInfo):
-        self.minRate = runInfo.mss/self.targetRTT
+        self.minRate = min(self.bottleneckRate/128, runInfo.mss/self.targetRTT)
         self.minRTT = min(self.minRTT, runInfo.lastRTT)
 
         if runInfo.inflight < 8:
@@ -71,33 +77,42 @@ class PID:
             self.muTime = runInfo.time
 
 
-        err = self.targetRTT - self.mrtt
+        if self.mrtt > self.targetRTT:
+            self.startup = False
+
+        err = self.targetRTT - runInfo.lastRTT
         tau = 4*self.targetRTT
-
-        if self.mrtt < self.targetRTT - 8*self.devRTT:
-            upper = self.targetRTT - runInfo.inflight*runInfo.mss/self.mu
-            err = max(err, upper)
-
+        
+        if self.startup:
+            err *= self.targetRTT/(self.targetRTT - self.minRTT)
 
         kp = 2*self.mu/tau
         ki = self.mu/tau**2
 
+        updatePeriod = 1.0e-2/max(1.0e-6, ki*abs(err))
+        #print(f"updatePeriod = {updatePeriod} ~ {self.mrtt}")
+
         dt = runInfo.time - self.lastTime
-        self.lastTime = runInfo.time
 
-        self.integ += ki*err*dt
-        self.integ += 0.1*self.minRate*dt/tau
+        if dt > updatePeriod:
+            self.lastTime = runInfo.time
 
-        self.rate = kp*err + self.integ
+            dIdt = ki*err + self.minRate*self.targetRTT/tau**2
+            self.integ += dIdt*dt
+            #print(f"rate = {self.rate}")
+            #print(f"dIdt/ki = {err} - {k/ki*self.rate} = {err - k/ki*self.rate}")
+
+            self.rate = kp*err + self.integ
 
         self.integ = clamp(self.integ, self.minRate, 2*self.bottleneckRate)
         self.rate = clamp(self.rate, self.minRate, 2*self.bottleneckRate)
 
 
     def loss(self, runInfo):
-        self.startup = False
-        self.integ = self.mu/2
-        self.rate = self.minRate
+        if self.startup:
+            self.startup = False
+            self.integ = self.mu/2
+            self.rate = self.minRate
 
 
     def getDebugInfo(self):

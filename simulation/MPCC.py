@@ -12,13 +12,13 @@ def convertRunInfo(runInfo):
     info = _mpcc.ffi.new("struct runtime_info*")
 
     if _mpcc.ffi.typeof('SNum').cname == 'int64_t':
-        info.time = math.ceil(runInfo.time)
-        info.lastRTT = math.ceil(runInfo.lastRTT)
+        info.time = math.ceil(runInfo.time*_mpcc.lib.US_PER_SEC)
+        info.lastRTT = math.ceil(runInfo.lastRTT*_mpcc.lib.US_PER_SEC)
         info.inflight = math.ceil(runInfo.inflight)
         info.mss = math.ceil(runInfo.mss)
     else:
-        info.time = runInfo.time
-        info.lastRTT = runInfo.lastRTT
+        info.time = runInfo.time*_mpcc.lib.US_PER_SEC
+        info.lastRTT = runInfo.lastRTT*_mpcc.lib.US_PER_SEC
         info.inflight = runInfo.inflight
         info.mss = runInfo.mss
 
@@ -28,7 +28,7 @@ class MPCC:
     def __init__(self, runInfo, bottleneckRate, targetRTT):
         cfg = _mpcc.ffi.new("struct mpcc_config*")
         cfg.bottleneckRate = int(bottleneckRate)
-        cfg.targetRTT = int(targetRTT)
+        cfg.targetRTT = int(targetRTT*_mpcc.lib.US_PER_SEC)
 
         self.m = _mpcc.ffi.new("struct mpcc*")
         _mpcc.lib.mpcc_init(self.m, cfg, convertRunInfo(runInfo))
@@ -46,8 +46,8 @@ class MPCC:
         _mpcc.lib.mpcc_on_loss(self.m, convertRunInfo(runInfo))
 
     def getDebugInfo(self):
-        return {'mrtt': self.m.mrtt*self.m.cfg.targetRTT/_mpcc.lib.M,
-                'mu': self.m.mu*self.m.cfg.bottleneckRate/_mpcc.lib.M,
-                'err': self.m.err*self.m.cfg.targetRTT/_mpcc.lib.M,
+        return {'mrtt': self.m.mrtt/_mpcc.lib.US_PER_SEC,
+                'mu': self.m.mu,
+                'err': self.m.err/_mpcc.lib.US_PER_SEC,
         #        'rtt_ref': self.ref,
-                'ssthresh': self.m.ssthresh*self.m.cfg.bottleneckRate/_mpcc.lib.M}
+                'ssthresh': self.m.ssthresh}

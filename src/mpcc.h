@@ -7,20 +7,17 @@
 #define MPCC_H
 
 
-// Normalization constant
-// rate = rate * M/bottleneckRate
-// rtt = rtt * M/targetRTT
-//
-// D is minimum delta, the minimum difference between two unequal
+// minDelta is minimum delta, the minimum difference between two unequal
 // values.
 
 typedef int64_t SNum;
-static const SNum M = 1 << 25;
-static const SNum D = 1;
+static const SNum minDelta = 1;
 
 //typedef double SNum;
-//static const SNum M = 1.0;
-//static const SNum D = 1.0e-10;
+//static const SNum minDelta = 1.0e-10;
+
+
+static const SNum US_PER_SEC = 1000000;
 
 
 struct mpcc_config {
@@ -43,7 +40,7 @@ struct mpcc {
     SNum ssthresh;
     bool recovery;
 
-    SNum mu, muInteg, muRTT, muTime, muLastTime;
+    SNum mu, muACKed, muTime;
 };
 
 
