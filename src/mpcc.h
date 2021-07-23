@@ -32,21 +32,16 @@ struct mpcc {
     struct mpcc_config cfg;
 
     SNum minRate;
-
     SNum mrtt, devRTT, lastTime;
-
-    SNum predRTT, err, rate;
-
-    SNum ssthresh;
-    bool recovery;
-
-    SNum mu, muACKed, muTime;
+    SNum rate;
+    SNum mu, muDeliv, muTime;
 };
 
 
 struct runtime_info {
     SNum time;
     SNum lastRTT;
+    SNum delivered;
     SNum inflight;
     SNum mss;
 };

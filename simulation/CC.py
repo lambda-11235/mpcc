@@ -6,9 +6,10 @@ import _mpcc
 
 
 class RuntimeInfo:
-    def __init__(self, time, lastRTT, inflight, mss):
+    def __init__(self, time, lastRTT, delivered, inflight, mss):
         self.time = time
         self.lastRTT = lastRTT
+        self.delivered = delivered
         self.inflight = inflight
         self.mss = mss
 

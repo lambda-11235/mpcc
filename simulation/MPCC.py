@@ -14,11 +14,13 @@ def convertRunInfo(runInfo):
     if _mpcc.ffi.typeof('SNum').cname == 'int64_t':
         info.time = math.ceil(runInfo.time*_mpcc.lib.US_PER_SEC)
         info.lastRTT = math.ceil(runInfo.lastRTT*_mpcc.lib.US_PER_SEC)
+        info.delivered = math.ceil(runInfo.delivered)
         info.inflight = math.ceil(runInfo.inflight)
         info.mss = math.ceil(runInfo.mss)
     else:
         info.time = runInfo.time*_mpcc.lib.US_PER_SEC
         info.lastRTT = runInfo.lastRTT*_mpcc.lib.US_PER_SEC
+        info.delivered = runInfo.delivered
         info.inflight = runInfo.inflight
         info.mss = runInfo.mss
 
@@ -47,7 +49,4 @@ class MPCC:
 
     def getDebugInfo(self):
         return {'mrtt': self.m.mrtt/_mpcc.lib.US_PER_SEC,
-                'mu': self.m.mu,
-                'err': self.m.err/_mpcc.lib.US_PER_SEC,
-        #        'rtt_ref': self.ref,
-                'ssthresh': self.m.ssthresh}
+                'mu': self.m.mu}

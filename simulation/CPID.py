@@ -14,11 +14,13 @@ def convertRunInfo(runInfo):
     if _pid.ffi.typeof('SNum').cname == 'int64_t':
         info.time = round(runInfo.time*_pid.lib.US_PER_SEC)
         info.lastRTT = round(runInfo.lastRTT*_pid.lib.US_PER_SEC)
+        info.delivered = round(runInfo.delivered)
         info.inflight = round(runInfo.inflight)
         info.mss = round(runInfo.mss)
     else:
         info.time = runInfo.time*_pid.lib.US_PER_SEC
         info.lastRTT = runInfo.lastRTT*_pid.lib.US_PER_SEC
+        info.delivered = runInfo.delivered
         info.inflight = runInfo.inflight
         info.mss = runInfo.mss
 

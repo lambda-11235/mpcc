@@ -2,9 +2,6 @@
 #include "mpcc.h"
 
 
-void updateMU(struct mpcc *m, struct runtime_info *info);
-
-
 SNum mpcc_abs(SNum x) {
     if (x < 0)
         return -x;
@@ -58,15 +55,10 @@ void mpcc_reset(struct mpcc *m, struct runtime_info *info) {
     m->devRTT = 0;
     m->lastTime = info->time;
 
-    m->predRTT = m->mrtt;
-    m->err = 0;
     m->rate = m->minRate;
 
-    m->ssthresh = m->cfg.bottleneckRate;
-    m->recovery = false;
-
-    m->mu = m->cfg.bottleneckRate;
-    m->muACKed = 0;
+    m->mu = m->minRate;
+    m->muDeliv = 0;
     m->muTime = info->time;
 }
 
@@ -79,12 +71,13 @@ SNum mpcc_pacing_rate(struct mpcc *m, struct runtime_info *info) {
 
 
 SNum mpcc_cwnd(struct mpcc *m, struct runtime_info *info) {
-    return mpcc_max(minDelta, 2*m->rate*m->cfg.targetRTT/(info->mss*US_PER_SEC));
+    SNum bdp = m->rate*m->cfg.targetRTT/(info->mss*US_PER_SEC);
+    return mpcc_max(1, 2*bdp);
 }
 
 
 void mpcc_on_ack(struct mpcc *m, struct runtime_info *info) {
-    SNum tau, ref, num, den;
+    SNum deliv, est, err, tau, num, den;
 
     m->minRate = mpcc_wma(m->minRate, (info->mss*US_PER_SEC)/info->lastRTT);
     m->minRate = mpcc_max(minDelta, m->minRate);
@@ -98,62 +91,33 @@ void mpcc_on_ack(struct mpcc *m, struct runtime_info *info) {
     m->devRTT = mpcc_wma(m->devRTT, mpcc_abs(info->lastRTT - m->mrtt));
 
 
-    if (m->mrtt > 2*m->cfg.targetRTT)
-        mpcc_on_loss(m, info);
-    else if (m->mrtt > m->cfg.targetRTT)
-        m->ssthresh = m->mu/4;
-
-    updateMU(m, info);
-
-    tau = 4*m->cfg.targetRTT;
-    if (info->time > m->lastTime + tau) {
-        m->lastTime = info->time;
-
-        if (m->mu < m->ssthresh && !m->recovery) {
-            m->err = 0;
-            ref = 2*m->cfg.targetRTT;
-        } else {
-            m->err = mpcc_wma(m->err, m->mrtt - m->predRTT);
-            ref = mpcc_wma(m->mrtt, m->cfg.targetRTT);
-        }
-
-        m->predRTT = m->mrtt + tau*(m->rate - m->mu)/m->mu;
-        m->err = 0;
-
-        num = m->cfg.targetRTT - m->err + ref - m->mrtt;
-        den = m->cfg.targetRTT;
-        m->rate = (num*m->mu)/den;
-    }
-
-
-    m->rate = mpcc_clamp(m->rate, m->minRate, 2*m->cfg.bottleneckRate);
-}
-
-
-void mpcc_on_loss(struct mpcc *m, struct runtime_info *info) {
-    m->rate = m->mu/2;
-    m->ssthresh = mpcc_min(m->ssthresh, m->mu/4);
-    m->recovery = true;
-}
-
-
-void updateMU(struct mpcc *m, struct runtime_info *info) {
-    SNum est;
-    
-    m->muACKed += 1;
     if (info->time > m->muTime + m->cfg.targetRTT) {
-        est = (m->muACKed*info->mss*US_PER_SEC)/(info->time - m->muTime);
+        deliv = (info->delivered - m->muDeliv)*info->mss;
+        est = deliv/(info->time - m->muTime);
 
         if (m->mrtt > m->cfg.targetRTT)
             m->mu = est;
         else
             m->mu = mpcc_max(m->mu, est);
 
-        //m->mu += m->minRate;
-
         m->mu = mpcc_clamp(m->mu, m->minRate, 2*m->cfg.bottleneckRate);
 
-        m->muACKed = 0;
+        m->muDeliv = info->delivered;
         m->muTime = info->time;
     }
-};
+
+
+    m->lastTime = info->time;
+
+    err = m->cfg.targetRTT - m->mrtt;
+    tau = 4*m->cfg.targetRTT;
+
+    num = tau + err;
+    den = tau;
+    m->rate = (num*m->mu)/den;// + m->minRate;
+    m->rate = mpcc_clamp(m->rate, m->minRate, 2*m->cfg.bottleneckRate);
+}
+
+
+void mpcc_on_loss(struct mpcc *m, struct runtime_info *info) {
+}

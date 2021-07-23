@@ -31,17 +31,17 @@ struct pid {
     // Rates are in bytes/s, times are in us, and percentages are out of 100.
     struct pid_config cfg;
 
-    bool startup;
     SNum minRate, minRTT;
     SNum mrtt, devRTT, lastTime;
     SNum integ, lastErr, rate;
-    SNum mu, muACKed, muTime;
+    SNum mu, muDeliv, muTime;
 };
 
 
 struct runtime_info {
     SNum time;
     SNum lastRTT;
+    SNum delivered;
     SNum inflight;
     SNum mss;
 };

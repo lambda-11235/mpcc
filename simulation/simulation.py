@@ -13,14 +13,13 @@ from MPCC import MPCC
 from PY_MPCC import PY_MPCC
 from CPID import CPID
 from PID import PID
-from PID_CWND import PID_CWND
 
 #matplotlib.use('TkAgg')
 
 
 # First  define some global variables
 class G:
-    NUM_CLIENTS = 40
+    NUM_CLIENTS = 4#0
 
     CLIENT_MARK = False
     SERVER_MARK = False
@@ -30,34 +29,32 @@ class G:
     MSS = 1500
     MU = 10*MSS
 
-    BASE_RTT = 5.0e-2
-    #TARGET_RTT = BASE_RTT + 2*NUM_CLIENTS*MSS/MU
-    TARGET_RTT = BASE_RTT + MSS/MU
+    BASE_RTT = 5.0
+    TARGET_RTT = BASE_RTT + NUM_CLIENTS*MSS/MU
+    #TARGET_RTT = BASE_RTT + MSS/MU
 
     MAX_SEQ = int(1000*MU*TARGET_RTT/MSS)
 
     # Setting RTO to None indicates that the client should use
     # (Mean RTT) + 4*(Dev. RTT)
-    RTO = TARGET_RTT + 4*NUM_CLIENTS*MSS/MU
-    #RTO = None
+    #MIN_RTO = 0
+    MIN_RTO = TARGET_RTT + 4*NUM_CLIENTS*MSS/MU
 
-    MAX_PACKETS = 10*MU*TARGET_RTT/MSS
+    MAX_PACKETS = MU*TARGET_RTT/MSS #+ NUM_CLIENTS*2
 
-    SIM_TIME = 10000*TARGET_RTT
+    SIM_TIME = 1000*TARGET_RTT
     START_TIME_OFFSETS = 0#SIM_TIME/(2*NUM_CLIENTS)
 
     def makeCC():
-        runInfo = RuntimeInfo(0, G.BASE_RTT, 0, G.MSS)
-        rate = G.MU - 1/(G.TARGET_RTT - G.BASE_RTT)
-        cwnd = rate*G.TARGET_RTT
+        runInfo = RuntimeInfo(0, G.BASE_RTT, 0, 0, G.MSS)
+        bdp = G.MU*G.TARGET_RTT/G.MSS
 
-        return MPCC(runInfo, G.MU, G.TARGET_RTT)
+        #return MPCC(runInfo, G.MU, G.TARGET_RTT)
         #return PY_MPCC(runInfo, G.MU, G.TARGET_RTT)
         #return CPID(runInfo, G.MU, G.TARGET_RTT)
-        #return PID(runInfo, G.MU, G.TARGET_RTT)
-        #return PID_CWND(runInfo, G.MU, G.TARGET_RTT)
+        return PID(runInfo, G.MU, G.TARGET_RTT)
         #return AIMD(runInfo, G.MU, G.TARGET_RTT)
-        #return ExactCC(G.MU, 1e6*G.MU*G.TARGET_RTT)
+        #return ExactCC(1.1*G.MU/G.NUM_CLIENTS, 1)
 
 
 class Statistics(object):
@@ -126,15 +123,15 @@ class Client(object):
         self.server = server
         self.action = env.process(self.run())
 
-        
+
         self.nextSeq = 0
         ## Number of acknowledgements for a sequence
         self.seqAcked = np.zeros(G.MAX_SEQ, dtype=int)
         ## Queue of sequence number for packets being sent
         self.queue = []
 
-        self.mrtt = G.BASE_RTT
         self.devRTT = G.BASE_RTT
+        self.mrtt = G.BASE_RTT
 
         self.delivered = 0
         self.losses = 0
@@ -146,7 +143,9 @@ class Client(object):
     def run(self):
         # Generate packets at rate lambda and store in queue
         while True:
-            runInfo = RuntimeInfo(self.env.now, self.lastRTT, self.inflight, G.MSS)
+            runInfo = RuntimeInfo(self.env.now, self.lastRTT,
+                                  self.delivered, self.inflight,
+                                  G.MSS)
 
             if G.CLIENT_MARK:
                 t = npr.exponential(G.MSS/self.cc.pacingRate(runInfo))
@@ -166,8 +165,7 @@ class Client(object):
 
 
     def ack(self, packet):
-        self.inflight -= 1
-        self.inflight = max(0, self.inflight)
+        self.inflight = max(0, self.inflight - 1)
 
         if self.seqAcked[packet.seq] == 0:
             self.delivered += 1
@@ -175,10 +173,12 @@ class Client(object):
         self.lastRTT = self.env.now - packet.sendTime
         self.seqAcked[packet.seq] += 1
 
-        self.mrtt = G.ALPHA*self.mrtt + (1 - G.ALPHA)*self.lastRTT
         self.devRTT = G.ALPHA*self.devRTT + (1 - G.ALPHA)*abs(self.lastRTT - self.mrtt)
+        self.mrtt = G.ALPHA*self.mrtt + (1 - G.ALPHA)*self.lastRTT
 
-        runInfo = RuntimeInfo(self.env.now, self.lastRTT, self.inflight, G.MSS)
+        runInfo = RuntimeInfo(self.env.now, self.lastRTT,
+                              self.delivered, self.inflight,
+                              G.MSS)
         self.cc.ack(runInfo)
 
         self.stats.update(self.env.now, self.delivered,
@@ -189,13 +189,20 @@ class Client(object):
 
 
     def loss(self):
-        self.inflight -= 1
-        self.inflight = max(0, self.inflight)
+        self.inflight = max(0, self.inflight - 1)
 
         self.losses += 1
 
-        runInfo = RuntimeInfo(self.env.now, self.lastRTT, self.inflight, G.MSS)
+        runInfo = RuntimeInfo(self.env.now, self.lastRTT,
+                              self.delivered, self.inflight,
+                              G.MSS)
         self.cc.loss(runInfo)
+
+        self.stats.update(self.env.now, self.delivered,
+                          self.losses, self.lastRTT,
+                          self.cc.pacingRate(runInfo),
+                          self.cc.cwnd(runInfo),
+                          self.cc.getDebugInfo())
 
 
     def newPacket(self):
@@ -211,13 +218,9 @@ class Client(object):
         Watch a packet for timeouts, and retransmit when necessary.
         """
         acked = False
-        
-        while not acked:
-            if G.RTO is None:
-                rto = self.mrtt + 4*self.devRTT
-            else:
-                rto = G.RTO
 
+        while not acked:
+            rto = max(G.MIN_RTO, self.mrtt + 4*self.devRTT)
             yield self.env.timeout(rto)
 
             if self.seqAcked[seq] > 0:
@@ -250,30 +253,62 @@ print(f"Target RTT: {G.TARGET_RTT}")
 print(f"MU: {G.MU}")
 
 print("Mean Throughput")
-total = 0
+delivs = []
+
 for i in range(G.NUM_CLIENTS):
     if len(stats[i].recs['delivered']) > 0:
-        deliv = stats[i].recs['delivered'][-1]
+        delivs.append(stats[i].recs['delivered'][-1])
     else:
-        deliv = 0
-        
-    throughput = deliv*G.MSS/G.SIM_TIME
-    total += deliv
-    print(f"\tClient {i}:\t{throughput:.3e}")
-total *= G.MSS/G.SIM_TIME
+        delivs.append(0)
+
+    throughput = delivs[-1]*G.MSS/G.SIM_TIME
+
+    if False:
+        print(f"\tClient {i}:\t{throughput:.3e}")
+
+delivs = np.array(delivs)
+total = sum(delivs)*G.MSS/G.SIM_TIME
+fairness = sum(delivs)**2/(len(delivs)*sum(delivs**2))
 print(f"\tTotal: {total} = {100*total/G.MU:.2f}% MU")
+print(f"\tJain Fairness: {fairness}")
 
-for k in stats[0].recs.keys():
-    if k == 'time':
-        continue
+print()
 
-    print(f"{k}")
+losses = 0
+for i in range(G.NUM_CLIENTS):
+    if len(stats[i].recs['losses']) > 0:
+        losses += stats[i].recs['losses'][-1]
+lossRate = np.sum(losses)*G.MSS/G.SIM_TIME
+print(f"Total Losses: {losses:.3e}")
+print(f"Total Loss Rate: {lossRate:.3e} = {100*lossRate/G.MU:.2f}% MU")
 
-    for i in range(G.NUM_CLIENTS):
-        v = stats[i].recs[k]
-        q1, q2, q3 = np.quantile(v, [1/4, 1/2, 3/4])
-        print(f"\tClient {i}:\tmean = {np.mean(v):.3e},\tstd = {np.std(v):.3e}")
-        print(f"\t\tmedian = {q2:.3e},\tIQR = {(q3 - q1):.3e}")
+print()
+
+mrtts = []
+IQRs = []
+for i in range(G.NUM_CLIENTS):
+    if len(stats[i].recs['rtt']) > 0:
+        q1, q2, q3 = np.quantile(stats[i].recs['rtt'], [1/4, 1/2, 3/4])
+        mrtts.append(q2)
+        IQRs.append(q3 - q1)
+print(f"Median of Client Median RTT: {np.median(mrtts)}")
+print(f"Max of Client Median RTT: {np.max(mrtts)}")
+print(f"Median of Client RTT IQRs: {np.median(IQRs)}")
+print(f"Max of Client RTT IQRs: {np.max(IQRs)}")
+
+
+if False:
+    for k in stats[0].recs.keys():
+        if k == 'time':
+            continue
+
+        print(f"{k}")
+
+        for i in range(G.NUM_CLIENTS):
+            v = stats[i].recs[k]
+            q1, q2, q3 = np.quantile(v, [1/4, 1/2, 3/4])
+            print(f"\tClient {i}:\tmean = {np.mean(v):.3e},\tstd = {np.std(v):.3e}")
+            print(f"\t\tmedian = {q2:.3e},\tIQR = {(q3 - q1):.3e}")
 
 
 for k in stats[0].recs.keys():
