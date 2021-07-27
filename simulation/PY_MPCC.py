@@ -33,7 +33,7 @@ class PY_MPCC:
         self.rate = self.minRate
         #self.rate = npr.uniform(self.minRate, self.bottleneckRate/4)
 
-        self.mu = self.bottleneckRate
+        self.mu = self.minRate
         self.muDeliv = 0
         self.muTime = runInfo.time
 
@@ -42,8 +42,8 @@ class PY_MPCC:
         return self.rate
 
     def cwnd(self, runInfo):
-        bdp = self.rate*self.targetRTT/runInfo.mss
-        return max(1, math.ceil(2*bdp))
+        bdp = int(self.rate*self.targetRTT/runInfo.mss)
+        return 1 + bdp
 
 
     def ack(self, runInfo):

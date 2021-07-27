@@ -53,7 +53,10 @@ void pid_release(struct pid *self) {
 
 
 void pid_reset(struct pid *self, struct runtime_info *info) {
-    self->minRate = pid_max(minDelta, info->mss*US_PER_SEC/info->lastRTT);
+    self->minRate = pid_min(self->cfg.bottleneckRate/128,
+                            info->mss*US_PER_SEC/self->cfg.targetRTT);
+    self->minRate = pid_max(minDelta, self->minRate);
+
     self->minRTT = info->lastRTT;
 
     self->mrtt = info->lastRTT;
@@ -62,6 +65,7 @@ void pid_reset(struct pid *self, struct runtime_info *info) {
 
     self->integ = self->minRate;
     self->rate = self->minRate;
+    self->ssthresh = self->cfg.bottleneckRate;
 
     self->mu = self->cfg.bottleneckRate;
     self->muDeliv = 0;
@@ -77,12 +81,12 @@ SNum pid_pacing_rate(struct pid *self, struct runtime_info *info) {
 
 SNum pid_cwnd(struct pid *self, struct runtime_info *info) {
     SNum bdp = self->rate*self->cfg.targetRTT/(info->mss*US_PER_SEC);
-    return pid_max(1, 2*bdp);
+    return 1 + bdp;
 }
 
 
 void pid_on_ack(struct pid *self, struct runtime_info *info) {
-    SNum deliv, dt, err, est, tau, updatePeriod;
+    SNum deliv, dIdt, dt, err, est, tau, updatePeriod;
     SNum kpNum, kpDen, kiNum, kiDen;
 
     self->minRate = pid_min(self->cfg.bottleneckRate/128,
@@ -99,9 +103,9 @@ void pid_on_ack(struct pid *self, struct runtime_info *info) {
     self->devRTT = pid_wma(self->devRTT, pid_abs(info->lastRTT - self->mrtt));
 
 
-    if (info->time > self->muTime + self->cfg.targetRTT) {
-        deliv = (info->delivered - self->muDeliv)*info->mss;
-        est = deliv/(info->time - self->muTime);
+    deliv = info->delivered - self->muDeliv;
+    if (info->time > self->muTime + self->cfg.targetRTT && deliv >= 4) {
+        est = deliv*info->mss*US_PER_SEC/(info->time - self->muTime);
 
         if (self->mrtt > self->cfg.targetRTT)
             self->mu = est;
@@ -112,6 +116,11 @@ void pid_on_ack(struct pid *self, struct runtime_info *info) {
 
         self->muDeliv = info->delivered;
         self->muTime = info->time;
+    }
+
+
+    if (self->mrtt > self->cfg.targetRTT) {
+        self->ssthresh = self->mu/2;
     }
 
 
@@ -130,8 +139,14 @@ void pid_on_ack(struct pid *self, struct runtime_info *info) {
     dt = info->time - self->lastTime;
 
     if (dt > updatePeriod) {
-        self->integ += kiNum*err*dt/kiDen;
-        //self->integ += self->minRate*self->cfg.targetRTT*dt/pid_sqr(tau)/10;
+        if (self->rate < self->ssthresh) {
+            dIdt = self->rate*dt/tau;
+        } else {
+            dIdt = kiNum*err*dt/kiDen;
+            dIdt += self->minRate*self->cfg.targetRTT*dt/pid_sqr(tau)/10;
+        }
+
+        self->integ += dIdt;
 
         self->rate = kpNum*err/kpDen + self->integ;
         self->lastTime = info->time;
@@ -143,5 +158,5 @@ void pid_on_ack(struct pid *self, struct runtime_info *info) {
 
 
 void pid_on_loss(struct pid *self, struct runtime_info *info) {
-    self->integ = pid_min(self->integ, self->mu - self->minRate);
+    self->ssthresh = pid_min(self->ssthresh, self->mu/2);
 }

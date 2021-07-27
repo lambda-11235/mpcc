@@ -33,7 +33,7 @@ struct pid {
 
     SNum minRate, minRTT;
     SNum mrtt, devRTT, lastTime;
-    SNum integ, lastErr, rate;
+    SNum integ, rate, ssthresh;
     SNum mu, muDeliv, muTime;
 };
 

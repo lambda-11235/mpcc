@@ -29,20 +29,20 @@ class G:
     MSS = 1500
     MU = 10*MSS
 
-    BASE_RTT = 5.0
+    BASE_RTT = 5.0#e-2
     TARGET_RTT = BASE_RTT + NUM_CLIENTS*MSS/MU
     #TARGET_RTT = BASE_RTT + MSS/MU
+    #TARGET_RTT = 1.1*BASE_RTT
 
     MAX_SEQ = int(1000*MU*TARGET_RTT/MSS)
 
-    # Setting RTO to None indicates that the client should use
-    # (Mean RTT) + 4*(Dev. RTT)
     #MIN_RTO = 0
-    MIN_RTO = TARGET_RTT + 4*NUM_CLIENTS*MSS/MU
+    MIN_RTO = 2*TARGET_RTT + 4*NUM_CLIENTS*MSS/MU
 
-    MAX_PACKETS = MU*TARGET_RTT/MSS #+ NUM_CLIENTS*2
+    NUM_SEND = 1000
+    MAX_PACKETS = max(MU*TARGET_RTT/MSS, 2*NUM_CLIENTS)
 
-    SIM_TIME = 1000*TARGET_RTT
+    SIM_TIME = 1000*NUM_SEND*MSS/MU
     START_TIME_OFFSETS = 0#SIM_TIME/(2*NUM_CLIENTS)
 
     def makeCC():
@@ -54,7 +54,7 @@ class G:
         #return CPID(runInfo, G.MU, G.TARGET_RTT)
         return PID(runInfo, G.MU, G.TARGET_RTT)
         #return AIMD(runInfo, G.MU, G.TARGET_RTT)
-        #return ExactCC(1.1*G.MU/G.NUM_CLIENTS, 1)
+        #return ExactCC(1.1*G.MU/G.NUM_CLIENTS, 1e6*bdp)
 
 
 class Statistics(object):
@@ -88,15 +88,21 @@ class Packet(object):
 
 
 class Server(object):
-    def __init__(self, env):
+    def __init__(self, env, done):
         self.env = env
         self.queue = []
         self.action = env.process(self.run())
 
+        self.done = done
+        self.activeClients = G.NUM_CLIENTS
+        self.totalDelivered = 0
+
     def run(self):
         # Generate packets at rate lambda and store in queue
-        while True:
-            print(f"{100*self.env.now/G.SIM_TIME:.2f}%", end='\r')
+        while self.activeClients > 0:
+            p1 = 100*self.totalDelivered/(G.NUM_CLIENTS*G.NUM_SEND)
+            p2 = 100*self.env.now/G.SIM_TIME
+            print(f"{max(p1, p2):.2f}%", end='\r')
 
             if G.SERVER_MARK:
                 t = npr.exponential(G.MSS/G.MU)
@@ -108,6 +114,11 @@ class Server(object):
             if len(self.queue) > 0:
                 p = self.queue.pop(0)
                 p.client.ack(p)
+
+            if env.now > G.SIM_TIME:
+                self.done.succeed()
+
+        self.done.succeed()
 
     def send(self, packet):
         yield self.env.timeout(G.BASE_RTT)
@@ -142,7 +153,7 @@ class Client(object):
 
     def run(self):
         # Generate packets at rate lambda and store in queue
-        while True:
+        while self.delivered < G.NUM_SEND:
             runInfo = RuntimeInfo(self.env.now, self.lastRTT,
                                   self.delivered, self.inflight,
                                   G.MSS)
@@ -161,14 +172,15 @@ class Client(object):
                 seq = self.queue.pop(0)
                 packet = Packet(self.env.now, self, seq)
                 self.env.process(self.server.send(packet))
-                self.inflight += 1
+
+        self.server.activeClients -= 1
 
 
     def ack(self, packet):
-        self.inflight = max(0, self.inflight - 1)
-
         if self.seqAcked[packet.seq] == 0:
+            self.inflight -= 1
             self.delivered += 1
+            self.server.totalDelivered += 1
 
         self.lastRTT = self.env.now - packet.sendTime
         self.seqAcked[packet.seq] += 1
@@ -189,8 +201,6 @@ class Client(object):
 
 
     def loss(self):
-        self.inflight = max(0, self.inflight - 1)
-
         self.losses += 1
 
         runInfo = RuntimeInfo(self.env.now, self.lastRTT,
@@ -209,6 +219,8 @@ class Client(object):
         seq = self.nextSeq
         self.nextSeq = (seq + 1)%G.MAX_SEQ
         self.seqAcked[seq] = 0
+
+        self.inflight += 1
 
         self.queue.append(seq)
         self.env.process(self.watch(seq))
@@ -231,20 +243,18 @@ class Client(object):
 
 
 env = simpy.Environment()
+done = env.event()
+server = Server(env, done)
+
 stats = [Statistics() for _ in range(G.NUM_CLIENTS)]
 
 def startup(env):
-    server = Server(env)
-
     for i in range(G.NUM_CLIENTS):
         clients = Client(env, stats[i], server)
         yield env.timeout(G.START_TIME_OFFSETS)
 
-    while True:
-        yield env.timeout(G.SIM_TIME)
-
 env.process(startup(env))
-env.run(until=G.SIM_TIME)
+env.run(until=done)#until=G.SIM_TIME)
 print()
 
 
@@ -261,13 +271,13 @@ for i in range(G.NUM_CLIENTS):
     else:
         delivs.append(0)
 
-    throughput = delivs[-1]*G.MSS/G.SIM_TIME
+    throughput = delivs[-1]*G.MSS/env.now
 
     if False:
         print(f"\tClient {i}:\t{throughput:.3e}")
 
 delivs = np.array(delivs)
-total = sum(delivs)*G.MSS/G.SIM_TIME
+total = sum(delivs)*G.MSS/env.now
 fairness = sum(delivs)**2/(len(delivs)*sum(delivs**2))
 print(f"\tTotal: {total} = {100*total/G.MU:.2f}% MU")
 print(f"\tJain Fairness: {fairness}")
@@ -278,7 +288,7 @@ losses = 0
 for i in range(G.NUM_CLIENTS):
     if len(stats[i].recs['losses']) > 0:
         losses += stats[i].recs['losses'][-1]
-lossRate = np.sum(losses)*G.MSS/G.SIM_TIME
+lossRate = np.sum(losses)*G.MSS/env.now
 print(f"Total Losses: {losses:.3e}")
 print(f"Total Loss Rate: {lossRate:.3e} = {100*lossRate/G.MU:.2f}% MU")
 
@@ -326,17 +336,17 @@ for k in stats[0].recs.keys():
         plt.plot(ts, vs, label=f"Client {i}")
 
     if k in {'rtt', 'mrtt'}:
-        plt.plot((0, G.SIM_TIME/G.TARGET_RTT), (G.TARGET_RTT, G.TARGET_RTT),
+        plt.plot((0, env.now/G.TARGET_RTT), (G.TARGET_RTT, G.TARGET_RTT),
                  'k--', label='Target RTT')
     elif k in {'pacingRate', 'mu', 'ssthresh', 'integ'}:
-        plt.plot((0, G.SIM_TIME/G.TARGET_RTT), (G.MU, G.MU),
+        plt.plot((0, env.now/G.TARGET_RTT), (G.MU, G.MU),
                  'k--', label='mu')
-        plt.plot((0, G.SIM_TIME/G.TARGET_RTT), (G.MU/G.NUM_CLIENTS, G.MU/G.NUM_CLIENTS),
+        plt.plot((0, env.now/G.TARGET_RTT), (G.MU/G.NUM_CLIENTS, G.MU/G.NUM_CLIENTS),
                  'k:', label='mu/N')
     elif k in {'delivered', 'losses'}:
-        plt.plot((0, G.SIM_TIME/G.TARGET_RTT), (0, G.MU*G.SIM_TIME/G.MSS),
+        plt.plot((0, env.now/G.TARGET_RTT), (0, G.MU*env.now/G.MSS),
                  'k--', label='mu')
-        plt.plot((0, G.SIM_TIME/G.TARGET_RTT), (0, G.MU*G.SIM_TIME/G.MSS/G.NUM_CLIENTS),
+        plt.plot((0, env.now/G.TARGET_RTT), (0, G.MU*env.now/G.MSS/G.NUM_CLIENTS),
                  'k:', label='mu/N')
 
     plt.xlabel("Time (Target RTTs)")
