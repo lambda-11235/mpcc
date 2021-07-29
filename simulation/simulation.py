@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 
-import matplotlib
-import matplotlib.pyplot as plt
+import argparse
+import json
+import sys
 
 import numpy as np
 import numpy.random as npr
@@ -17,9 +18,17 @@ from PID import PID
 #matplotlib.use('TkAgg')
 
 
+parser = argparse.ArgumentParser(
+    description="Run simulation of congestion under queue")
+parser.add_argument(
+    '--output', default=sys.stdout, type=argparse.FileType('w'),
+    help="File to write JSON client measurements to.")
+args = parser.parse_args()
+
+
 # First  define some global variables
 class G:
-    NUM_CLIENTS = 4#0
+    NUM_CLIENTS = 40
 
     CLIENT_MARK = False
     SERVER_MARK = False
@@ -27,19 +36,19 @@ class G:
     ALPHA = 0.9
 
     MSS = 1500
-    MU = 10*MSS
+    MU = 100*MSS
 
-    BASE_RTT = 5.0#e-2
+    BASE_RTT = 5.0e-2
     TARGET_RTT = BASE_RTT + NUM_CLIENTS*MSS/MU
     #TARGET_RTT = BASE_RTT + MSS/MU
     #TARGET_RTT = 1.1*BASE_RTT
 
     MAX_SEQ = int(1000*MU*TARGET_RTT/MSS)
 
-    #MIN_RTO = 0
-    MIN_RTO = 2*TARGET_RTT + 4*NUM_CLIENTS*MSS/MU
+    MIN_RTO = 0
+    #MIN_RTO = 2*TARGET_RTT + 4*NUM_CLIENTS*MSS/MU
 
-    NUM_SEND = 1000
+    NUM_SEND = 10000
     MAX_PACKETS = max(MU*TARGET_RTT/MSS, 2*NUM_CLIENTS)
 
     SIM_TIME = 1000*NUM_SEND*MSS/MU
@@ -255,103 +264,30 @@ def startup(env):
 
 env.process(startup(env))
 env.run(until=done)#until=G.SIM_TIME)
-print()
 
 
-print(f"Base RTT: {G.BASE_RTT}")
-print(f"Target RTT: {G.TARGET_RTT}")
-print(f"MU: {G.MU}")
-
-print("Mean Throughput")
-delivs = []
-
+clientData = []
 for i in range(G.NUM_CLIENTS):
-    if len(stats[i].recs['delivered']) > 0:
-        delivs.append(stats[i].recs['delivered'][-1])
-    else:
-        delivs.append(0)
+    clientData.append(stats[i].recs)
 
-    throughput = delivs[-1]*G.MSS/env.now
+data = {'CLIENT_DATA': clientData,
+        'RUNTIME': env.now,
+        'SIM_PARAMS': {
+            'NUM_CLIENTS': G.NUM_CLIENTS,
+            'CLIENT_MARK': G.CLIENT_MARK,
+            'SERVER_MARK': G.SERVER_MARK,
+            'ALPHA': G.ALPHA,
+            'MSS': G.MSS,
+            'MU': G.MU,
+            'BASE_RTT': G.BASE_RTT,
+            'TARGET_RTT': G.TARGET_RTT,
+            'MAX_SEQ': G.MAX_SEQ,
+            'MIN_RTO': G.MIN_RTO,
+            'NUM_SEND': G.NUM_SEND,
+            'MAX_PACKETS': G.MAX_PACKETS,
+            'SIM_TIME': G.SIM_TIME,
+            'START_TIME_OFFSETS': G.START_TIME_OFFSETS
+        }}
 
-    if False:
-        print(f"\tClient {i}:\t{throughput:.3e}")
-
-delivs = np.array(delivs)
-total = sum(delivs)*G.MSS/env.now
-fairness = sum(delivs)**2/(len(delivs)*sum(delivs**2))
-print(f"\tTotal: {total} = {100*total/G.MU:.2f}% MU")
-print(f"\tJain Fairness: {fairness}")
-
-print()
-
-losses = 0
-for i in range(G.NUM_CLIENTS):
-    if len(stats[i].recs['losses']) > 0:
-        losses += stats[i].recs['losses'][-1]
-lossRate = np.sum(losses)*G.MSS/env.now
-print(f"Total Losses: {losses:.3e}")
-print(f"Total Loss Rate: {lossRate:.3e} = {100*lossRate/G.MU:.2f}% MU")
-
-print()
-
-mrtts = []
-IQRs = []
-for i in range(G.NUM_CLIENTS):
-    if len(stats[i].recs['rtt']) > 0:
-        q1, q2, q3 = np.quantile(stats[i].recs['rtt'], [1/4, 1/2, 3/4])
-        mrtts.append(q2)
-        IQRs.append(q3 - q1)
-print(f"Median of Client Median RTT: {np.median(mrtts)}")
-print(f"Max of Client Median RTT: {np.max(mrtts)}")
-print(f"Median of Client RTT IQRs: {np.median(IQRs)}")
-print(f"Max of Client RTT IQRs: {np.max(IQRs)}")
-
-
-if False:
-    for k in stats[0].recs.keys():
-        if k == 'time':
-            continue
-
-        print(f"{k}")
-
-        for i in range(G.NUM_CLIENTS):
-            v = stats[i].recs[k]
-            q1, q2, q3 = np.quantile(v, [1/4, 1/2, 3/4])
-            print(f"\tClient {i}:\tmean = {np.mean(v):.3e},\tstd = {np.std(v):.3e}")
-            print(f"\t\tmedian = {q2:.3e},\tIQR = {(q3 - q1):.3e}")
-
-
-for k in stats[0].recs.keys():
-    if k == 'time':
-        continue
-
-    plt.figure()
-
-    for i in range(G.NUM_CLIENTS):
-        ts = stats[i].recs['time']
-        ts = np.array(ts)/G.TARGET_RTT
-
-        vs = stats[i].recs[k]
-
-        plt.plot(ts, vs, label=f"Client {i}")
-
-    if k in {'rtt', 'mrtt'}:
-        plt.plot((0, env.now/G.TARGET_RTT), (G.TARGET_RTT, G.TARGET_RTT),
-                 'k--', label='Target RTT')
-    elif k in {'pacingRate', 'mu', 'ssthresh', 'integ'}:
-        plt.plot((0, env.now/G.TARGET_RTT), (G.MU, G.MU),
-                 'k--', label='mu')
-        plt.plot((0, env.now/G.TARGET_RTT), (G.MU/G.NUM_CLIENTS, G.MU/G.NUM_CLIENTS),
-                 'k:', label='mu/N')
-    elif k in {'delivered', 'losses'}:
-        plt.plot((0, env.now/G.TARGET_RTT), (0, G.MU*env.now/G.MSS),
-                 'k--', label='mu')
-        plt.plot((0, env.now/G.TARGET_RTT), (0, G.MU*env.now/G.MSS/G.NUM_CLIENTS),
-                 'k:', label='mu/N')
-
-    plt.xlabel("Time (Target RTTs)")
-    plt.ylabel(k)
-    plt.grid()
-    plt.legend()
-
-    plt.savefig(f"figures/{k}.png")
+json.dump(data, args.output)
+args.output.close()
