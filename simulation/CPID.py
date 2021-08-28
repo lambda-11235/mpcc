@@ -17,27 +17,29 @@ def convertRunInfo(runInfo):
         info.delivered = round(runInfo.delivered)
         info.inflight = round(runInfo.inflight)
         info.mss = round(runInfo.mss)
+        info.hops = round(runInfo.hops)
     else:
         info.time = runInfo.time*_pid.lib.US_PER_SEC
         info.lastRTT = runInfo.lastRTT*_pid.lib.US_PER_SEC
         info.delivered = runInfo.delivered
         info.inflight = runInfo.inflight
         info.mss = runInfo.mss
+        info.hops = runInfo.hops
 
     return info
 
 class CPID:
-    def __init__(self, runInfo, bottleneckRate, targetRTT):
+    def __init__(self, runInfo, bottleneckRate, baseRTT):
         cfg = _pid.ffi.new("struct pid_config*")
 
         if _pid.ffi.typeof('SNum').cname == 'int64_t':
             cfg.bottleneckRate = int(bottleneckRate)
-            cfg.targetRTT = int(targetRTT*_pid.lib.US_PER_SEC)
+            cfg.baseRTT = int(baseRTT*_pid.lib.US_PER_SEC)
         else:
             cfg.bottleneckRate = bottleneckRate
-            cfg.targetRTT = targetRTT*_pid.lib.US_PER_SEC
+            cfg.baseRTT = baseRTT*_pid.lib.US_PER_SEC
 
-        self.p = _pid.ffi.new("struct pid*")
+        self.p = _pid.ffi.new("struct pid_control*")
         _pid.lib.pid_init(self.p, cfg, convertRunInfo(runInfo))
 
     def pacingRate(self, runInfo):
@@ -56,4 +58,5 @@ class CPID:
         return {'mrtt': self.p.mrtt/_pid.lib.US_PER_SEC,
                 'mu': self.p.mu,
                 'integ': self.p.integ,
-                'ssthresh': self.p.ssthresh}
+                'ssthresh': self.p.ssthresh,
+                'targetRTT': self.p.targetRTT/_pid.lib.US_PER_SEC}

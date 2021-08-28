@@ -21,47 +21,59 @@ from PID import PID
 parser = argparse.ArgumentParser(
     description="Run simulation of congestion under queue")
 parser.add_argument(
-    '--output', default=sys.stdout, type=argparse.FileType('w'),
+    '--output',
     help="File to write JSON client measurements to.")
 args = parser.parse_args()
+
+
+def serverDist(mean):
+    #return mean
+    #return npr.exponential(mean)
+    #return npr.normal(0.25*mean, 0.1*mean) + npr.normal(0.75*mean, 0.1*mean)
+    return npr.uniform(0.5*mean, 1.5*mean)
+
+def clientDist(mean):
+    #return mean
+    #return npr.exponential(mean)
+    return npr.normal(mean, 0.1*mean)
 
 
 # First  define some global variables
 class G:
     NUM_CLIENTS = 40
 
-    CLIENT_MARK = False
-    SERVER_MARK = False
-
     ALPHA = 0.9
 
     MSS = 1500
     MU = 100*MSS
 
-    BASE_RTT = 5.0e-2
-    TARGET_RTT = BASE_RTT + NUM_CLIENTS*MSS/MU
-    #TARGET_RTT = BASE_RTT + MSS/MU
-    #TARGET_RTT = 1.1*BASE_RTT
+    BASE_RTT = 5.0#e-2
 
-    MAX_SEQ = int(1000*MU*TARGET_RTT/MSS)
+    MAX_SEQ = int(1000*MU*BASE_RTT/MSS)
 
-    MIN_RTO = 0
-    #MIN_RTO = 2*TARGET_RTT + 4*NUM_CLIENTS*MSS/MU
+    #MIN_RTO = 0
+    MIN_RTO = 2*BASE_RTT + 4*NUM_CLIENTS*MSS/MU
 
-    NUM_SEND = 10000
-    MAX_PACKETS = max(MU*TARGET_RTT/MSS, 2*NUM_CLIENTS)
+    MAX_PACKETS = max(2*MU*BASE_RTT/MSS, 2*NUM_CLIENTS)
+    COALESCE = 0.1*MU*BASE_RTT/MSS
 
-    SIM_TIME = 1000*NUM_SEND*MSS/MU
-    START_TIME_OFFSETS = 0#SIM_TIME/(2*NUM_CLIENTS)
+    if False:
+        NUM_SEND = 100000/NUM_CLIENTS
+        SIM_TIME = None
+        START_TIME_OFFSETS = 0
+    else:
+        NUM_SEND = None
+        SIM_TIME = 1000*BASE_RTT
+        START_TIME_OFFSETS = SIM_TIME/(4*NUM_CLIENTS)
 
     def makeCC():
-        runInfo = RuntimeInfo(0, G.BASE_RTT, 0, 0, G.MSS)
-        bdp = G.MU*G.TARGET_RTT/G.MSS
+        runInfo = RuntimeInfo(0, G.BASE_RTT, 0, 0, G.MSS, 1)
+        bdp = G.MU*G.BASE_RTT/G.MSS
 
         #return MPCC(runInfo, G.MU, G.TARGET_RTT)
         #return PY_MPCC(runInfo, G.MU, G.TARGET_RTT)
-        #return CPID(runInfo, G.MU, G.TARGET_RTT)
-        return PID(runInfo, G.MU, G.TARGET_RTT)
+        #return CPID(runInfo, G.MU, G.BASE_RTT)
+        return PID(runInfo, G.MU, G.BASE_RTT, G.COALESCE)
         #return AIMD(runInfo, G.MU, G.TARGET_RTT)
         #return ExactCC(1.1*G.MU/G.NUM_CLIENTS, 1e6*bdp)
 
@@ -100,6 +112,7 @@ class Server(object):
     def __init__(self, env, done):
         self.env = env
         self.queue = []
+        self.coalesceQueue = []
         self.action = env.process(self.run())
 
         self.done = done
@@ -109,22 +122,32 @@ class Server(object):
     def run(self):
         # Generate packets at rate lambda and store in queue
         while self.activeClients > 0:
-            p1 = 100*self.totalDelivered/(G.NUM_CLIENTS*G.NUM_SEND)
-            p2 = 100*self.env.now/G.SIM_TIME
+            if G.SIM_TIME is None:
+                p1 = 0
+            else:
+                p1 = 100*self.env.now/G.SIM_TIME
+
+            if G.NUM_SEND is None:
+                p2 = 0
+            else:
+                p2 = 100*self.totalDelivered/(G.NUM_CLIENTS*G.NUM_SEND)
+                
             print(f"{max(p1, p2):.2f}%", end='\r')
 
-            if G.SERVER_MARK:
-                t = npr.exponential(G.MSS/G.MU)
-            else:
-                t = G.MSS/G.MU
+
+            t = serverDist(G.MSS/G.MU)
 
             yield self.env.timeout(t)
+
+            if len(self.coalesceQueue) > G.COALESCE:
+                while len(self.coalesceQueue) > 0:
+                    self.queue.append(self.coalesceQueue.pop(0))
 
             if len(self.queue) > 0:
                 p = self.queue.pop(0)
                 p.client.ack(p)
 
-            if env.now > G.SIM_TIME:
+            if G.SIM_TIME is not None and env.now > G.SIM_TIME:
                 self.done.succeed()
 
         self.done.succeed()
@@ -133,7 +156,7 @@ class Server(object):
         yield self.env.timeout(G.BASE_RTT)
 
         if len(self.queue) < G.MAX_PACKETS:
-            self.queue.append(packet)
+            self.coalesceQueue.append(packet)
 
 
 class Client(object):
@@ -162,15 +185,12 @@ class Client(object):
 
     def run(self):
         # Generate packets at rate lambda and store in queue
-        while self.delivered < G.NUM_SEND:
+        while G.NUM_SEND is None or self.delivered < G.NUM_SEND:
             runInfo = RuntimeInfo(self.env.now, self.lastRTT,
                                   self.delivered, self.inflight,
-                                  G.MSS)
+                                  G.MSS, 1)
 
-            if G.CLIENT_MARK:
-                t = npr.exponential(G.MSS/self.cc.pacingRate(runInfo))
-            else:
-                t = G.MSS/self.cc.pacingRate(runInfo)
+            t = clientDist(G.MSS/self.cc.pacingRate(runInfo))
 
             yield self.env.timeout(t)
 
@@ -199,7 +219,7 @@ class Client(object):
 
         runInfo = RuntimeInfo(self.env.now, self.lastRTT,
                               self.delivered, self.inflight,
-                              G.MSS)
+                              G.MSS, 1)
         self.cc.ack(runInfo)
 
         self.stats.update(self.env.now, self.delivered,
@@ -214,7 +234,7 @@ class Client(object):
 
         runInfo = RuntimeInfo(self.env.now, self.lastRTT,
                               self.delivered, self.inflight,
-                              G.MSS)
+                              G.MSS, 1)
         self.cc.loss(runInfo)
 
         self.stats.update(self.env.now, self.delivered,
@@ -263,7 +283,7 @@ def startup(env):
         yield env.timeout(G.START_TIME_OFFSETS)
 
 env.process(startup(env))
-env.run(until=done)#until=G.SIM_TIME)
+env.run(until=done)
 
 
 clientData = []
@@ -274,20 +294,25 @@ data = {'CLIENT_DATA': clientData,
         'RUNTIME': env.now,
         'SIM_PARAMS': {
             'NUM_CLIENTS': G.NUM_CLIENTS,
-            'CLIENT_MARK': G.CLIENT_MARK,
-            'SERVER_MARK': G.SERVER_MARK,
             'ALPHA': G.ALPHA,
             'MSS': G.MSS,
             'MU': G.MU,
             'BASE_RTT': G.BASE_RTT,
-            'TARGET_RTT': G.TARGET_RTT,
+            #'TARGET_RTT': G.TARGET_RTT,
             'MAX_SEQ': G.MAX_SEQ,
             'MIN_RTO': G.MIN_RTO,
             'NUM_SEND': G.NUM_SEND,
             'MAX_PACKETS': G.MAX_PACKETS,
+            'COALESCE': G.COALESCE,
             'SIM_TIME': G.SIM_TIME,
             'START_TIME_OFFSETS': G.START_TIME_OFFSETS
         }}
 
-json.dump(data, args.output)
-args.output.close()
+
+if args.output is None:
+    output = sys.stdout
+else:
+    output = open(args.output, 'w')
+
+json.dump(data, output)
+output.close()

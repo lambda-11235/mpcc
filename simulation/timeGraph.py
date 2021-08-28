@@ -33,24 +33,24 @@ for k in data['CLIENT_DATA'][0].keys():
 
     for i, client in enumerate(data['CLIENT_DATA']):
         ts = client['time']
-        ts = np.array(ts)/params['TARGET_RTT']
+        ts = np.array(ts)/params['BASE_RTT']
 
         vs = client[k]
 
         plt.plot(ts, vs, label=f"Client {i}")
 
     if k in {'rtt', 'mrtt'}:
-        plt.plot((0, data['RUNTIME']/params['TARGET_RTT']), (params['TARGET_RTT'], params['TARGET_RTT']),
+        plt.plot((0, data['RUNTIME']/params['BASE_RTT']), (params['BASE_RTT'], params['BASE_RTT']),
                  'k--', label='Target RTT')
     elif k in {'pacingRate', 'mu', 'ssthresh', 'integ'}:
-        plt.plot((0, data['RUNTIME']/params['TARGET_RTT']), (params['MU'], params['MU']),
+        plt.plot((0, data['RUNTIME']/params['BASE_RTT']), (params['MU'], params['MU']),
                  'k--', label='mu')
-        plt.plot((0, data['RUNTIME']/params['TARGET_RTT']), (params['MU']/params['NUM_CLIENTS'], params['MU']/params['NUM_CLIENTS']),
+        plt.plot((0, data['RUNTIME']/params['BASE_RTT']), (params['MU']/params['NUM_CLIENTS'], params['MU']/params['NUM_CLIENTS']),
                  'k:', label='mu/N')
     elif k in {'delivered', 'losses'}:
-        plt.plot((0, data['RUNTIME']/params['TARGET_RTT']), (0, params['MU']*data['RUNTIME']/params['MSS']),
+        plt.plot((0, data['RUNTIME']/params['BASE_RTT']), (0, params['MU']*data['RUNTIME']/params['MSS']),
                  'k--', label='mu')
-        plt.plot((0, data['RUNTIME']/params['TARGET_RTT']), (0, params['MU']*data['RUNTIME']/params['MSS']/params['NUM_CLIENTS']),
+        plt.plot((0, data['RUNTIME']/params['BASE_RTT']), (0, params['MU']*data['RUNTIME']/params['MSS']/params['NUM_CLIENTS']),
                  'k:', label='mu/N')
 
     plt.xlabel("Time (Target RTTs)")

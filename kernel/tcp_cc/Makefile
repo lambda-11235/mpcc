@@ -1,22 +1,21 @@
 
 QDEV := eth3
-MPC_DIR = ../mpc
 SRC_DIR = ../../src
 
-obj-m += mpc_cc.o
-mpc_cc-y += cong_control.o
-mpc_cc-y += $(SRC_DIR)/mpcc.o $(SRC_DIR)/filter.o $(MPC_DIR)/dfs.o $(MPC_DIR)/sysfs.o
-ccflags-y += -I$(shell realpath $(MPC_DIR)) -DLINUX_KERNEL
+obj-m += pid_cc.o
+pid_cc-y += cong_control.o
+pid_cc-y += $(SRC_DIR)/pid.o
+ccflags-y += -I$(shell realpath $(SRC_DIR)) -DLINUX_KERNEL
 ccflags-y += -g -O0 -DDEBUG
 
 all:
-	make -C "/lib/modules/$(shell uname -r)/build" M=$(PWD) modules
-	#make -C `nix-build -E '(import <nixpkgs> {}).linux.dev' --no-out-link`/lib/modules/*/build M=$(PWD) modules
+	#make -C "/lib/modules/$(shell uname -r)/build" M=$(PWD) modules
+	make -C `nix-build -E '(import <nixpkgs> {}).linux.dev' --no-out-link`/lib/modules/*/build M=$(PWD) modules
 	#make -C `nix-build -E '(import <nixpkgs> {}).linux_latest.dev' --no-out-link`/lib/modules/*/build M=$(PWD) modules
 
 clean:
-	make -C "/lib/modules/$(shell uname -r)/build" M=$(PWD) clean
-	#make -C `nix-build -E '(import <nixpkgs> {}).linux.dev' --no-out-link`/lib/modules/*/build M=$(PWD) clean
+	#make -C "/lib/modules/$(shell uname -r)/build" M=$(PWD) clean
+	make -C `nix-build -E '(import <nixpkgs> {}).linux.dev' --no-out-link`/lib/modules/*/build M=$(PWD) clean
 	#make -C `nix-build -E '(import <nixpkgs> {}).linux_latest.dev' --no-out-link`/lib/modules/*/build M=$(PWD) clean
 
 start:

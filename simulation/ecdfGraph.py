@@ -38,8 +38,8 @@ for k in data['CLIENT_DATA'][0].keys():
         plt.plot(xs, ys, label=f"Client {i}")
 
     if k in {'rtt', 'mrtt'}:
-        plt.plot((params['TARGET_RTT'], params['TARGET_RTT']), (0, 1),
-                 'k--', label='Target RTT')
+        plt.plot((params['BASE_RTT'], params['BASE_RTT']), (0, 1),
+                 'k--', label='Base RTT')
     elif k in {'pacingRate', 'mu', 'ssthresh', 'integ'}:
         plt.plot((params['MU'], params['MU']), (0, 1),
                  'k--', label='mu')

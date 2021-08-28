@@ -26,7 +26,7 @@ params = data['SIM_PARAMS']
 
 
 print(f"Base RTT: {params['BASE_RTT']}")
-print(f"Target RTT: {params['TARGET_RTT']}")
+#print(f"Target RTT: {params['TARGET_RTT']}")
 print(f"MU: {params['MU']}")
 
 print()
@@ -36,6 +36,8 @@ delivered = []
 losses = 0
 mrtts = []
 IQRs = []
+rtt99 = []
+avgTargets = []
 
 for client in data['CLIENT_DATA']:
     if len(client['delivered']) > 0:
@@ -47,9 +49,13 @@ for client in data['CLIENT_DATA']:
         losses += client['losses'][-1]
 
     if len(client['rtt']) > 0:
-        q1, q2, q3 = np.quantile(client['rtt'], [1/4, 1/2, 3/4])
+        q1, q2, q3, q4 = np.quantile(client['rtt'], [1/4, 1/2, 3/4, 0.99])
         mrtts.append(q2)
         IQRs.append(q3 - q1)
+        rtt99.append(q4)
+
+    if len(client['targetRTT']) > 0:
+        avgTargets.append(np.mean(client['targetRTT']))
 
 
 delivered = np.array(delivered)
@@ -70,3 +76,9 @@ print(f"Median of Client Median RTT: {np.median(mrtts)}")
 print(f"Max of Client Median RTT: {np.max(mrtts)}")
 print(f"Median of Client RTT IQRs: {np.median(IQRs)}")
 print(f"Max of Client RTT IQRs: {np.max(IQRs)}")
+print(f"Median of Client RTT 99th: {np.median(rtt99)}")
+print(f"Max of Client RTT 99th: {np.max(rtt99)}")
+
+print()
+
+print(f"Median of Client Average Target RTT: {np.median(avgTargets)}")

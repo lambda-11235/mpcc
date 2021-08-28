@@ -6,12 +6,13 @@ import _mpcc
 
 
 class RuntimeInfo:
-    def __init__(self, time, lastRTT, delivered, inflight, mss):
+    def __init__(self, time, lastRTT, delivered, inflight, mss, hops):
         self.time = time
         self.lastRTT = lastRTT
         self.delivered = delivered
         self.inflight = inflight
         self.mss = mss
+        self.hops = hops
 
 
 class CongControl:

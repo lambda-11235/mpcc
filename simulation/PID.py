@@ -19,21 +19,25 @@ def clamp(x, minimum, maximum):
 
 
 class PID:
-    def __init__(self, runInfo, bottleneckRate, targetRTT):
+    def __init__(self, runInfo, bottleneckRate, baseRTT, coalesce):
         self.bottleneckRate = bottleneckRate
-        self.targetRTT = targetRTT
+        self.baseRTT = baseRTT
+        self.coalesce = coalesce
 
-        self.minRate = min(self.bottleneckRate/128, runInfo.mss/self.targetRTT)
-        self.minRTT = runInfo.lastRTT
+        self.minRate = min(self.bottleneckRate/128, runInfo.mss/self.baseRTT)
 
-        self.mrtt = runInfo.lastRTT
-        self.devRTT = 0
-        self.lastTime = runInfo.time
-        self.lossCredit = 0
+        self.srtt = runInfo.lastRTT
+        self.srttLastTime = runInfo.time
+
+        self.tau = max(4*baseRTT, runInfo.mss/self.bottleneckRate)
+        self.targetRTT = baseRTT
+
+        self.rateLastTime = runInfo.time
+        self.rttLastTime = runInfo.time
 
         self.integ = self.minRate
         self.rate = self.minRate
-        self.ssthresh = self.bottleneckRate
+        self.slowStart = True
 
         self.mu = self.minRate
         self.muDeliv = 0
@@ -50,21 +54,15 @@ class PID:
 
     def ack(self, runInfo):
         self.minRate = min(self.bottleneckRate/128, runInfo.mss/self.targetRTT)
-        self.minRTT = min(self.minRTT, runInfo.lastRTT)
+        self.tau = max(4*self.baseRTT, runInfo.mss/self.bottleneckRate)
 
-        self.devRTT = wma(self.devRTT, abs(runInfo.lastRTT - self.mrtt))
-
-        if runInfo.inflight < 8:
-            self.mrtt = runInfo.lastRTT
-        else:
-            self.mrtt = wma(self.mrtt, runInfo.lastRTT)
-
+        self.updateSRTT(runInfo)
 
         deliv = runInfo.delivered - self.muDeliv
         if runInfo.time > self.muTime + self.targetRTT and deliv > 0:
             est = deliv*runInfo.mss/(runInfo.time - self.muTime)
 
-            if self.mrtt > self.targetRTT:
+            if self.srtt > self.targetRTT:
                 self.mu = est
             else:
                 self.mu = max(self.mu, est)
@@ -74,55 +72,77 @@ class PID:
             self.muDeliv = runInfo.delivered
             self.muTime = runInfo.time
 
-        if self.mrtt > self.targetRTT:
-            self.ssthresh = self.mu/2
+        self.update(runInfo)
 
 
+    def loss(self, runInfo):
+        self.slowStart = False
         self.update(runInfo)
 
 
     def update(self, runInfo):
+        self.updateTargetRTT(runInfo)
+        self.updateRate(runInfo)
+
+
+    def updateSRTT(self, runInfo):
+        dt = runInfo.time - self.srttLastTime
+
+        diffSRTT = runInfo.lastRTT - self.srtt
+        diffSRTT *= min(1, dt/self.baseRTT)
+
+        if diffSRTT != 0:
+            self.srttLastTime = runInfo.time
+
+            self.srtt += diffSRTT
+
+
+    def updateTargetRTT(self, runInfo):
+        dt = runInfo.time - self.rttLastTime
+
+        nt = self.baseRTT
+        nt += (self.coalesce + runInfo.hops)*runInfo.mss/self.bottleneckRate
+        nt += runInfo.mss/self.mu
+
+        diffTargetRTT = (nt - self.targetRTT)
+        diffTargetRTT *= min(1, dt/self.tau)
+
+        if diffTargetRTT != 0:
+            self.rttLastTime = runInfo.time
+
+            self.targetRTT += diffTargetRTT
+            self.targetRTT = max(self.baseRTT, self.targetRTT)
+        
+
+    def updateRate(self, runInfo):
+        dt = runInfo.time - self.rateLastTime
+
         err = self.targetRTT - runInfo.lastRTT
-        err -= self.lossCredit
 
-        tau = max(4*self.targetRTT, runInfo.mss/self.mu)
+        kp = 2*self.mu/self.tau
+        ki = self.mu/self.tau**2
 
-        kp = 2*self.mu/tau
-        ki = self.mu/tau**2
+        if self.slowStart:
+            diffInteg = self.rate
+            diffInteg *= min(1, dt/self.tau)
+        else:
+            diffInteg = ki*err
+            diffInteg *= min(self.tau, dt)
 
-        updatePeriod = 1.0e-2/max(1.0e-6, ki*abs(err))
-        #print(f"updatePeriod = {updatePeriod} ~ {self.mrtt}")
+        if diffInteg != 0:
+            self.rateLastTime = runInfo.time
 
-        dt = runInfo.time - self.lastTime
-
-        if dt > updatePeriod:
-            self.lastTime = runInfo.time
-
-            if self.rate < self.ssthresh:
-                dIdt = self.rate/tau
-            else:
-                dIdt = ki*err
-                #dIdt += self.minRate*self.targetRTT/tau**2
-
-            self.integ += dIdt*dt
+            self.integ += diffInteg
             self.rate = kp*err + self.integ
-
-            self.lossCredit -= self.lossCredit*dt/tau
 
         self.integ = clamp(self.integ, self.minRate, 2*self.bottleneckRate)
         self.rate = clamp(self.rate, self.minRate, 2*self.bottleneckRate)
 
 
-    def loss(self, runInfo):
-        self.ssthresh = min(self.ssthresh, self.mu/2)
-
-        self.lossCredit = self.targetRTT
-        self.update(runInfo)
-
-
     def getDebugInfo(self):
-        return {'mrtt': self.mrtt,
+        return {'srtt': self.srtt,
+                'tau': self.tau,
                 'mu': self.mu,
                 'integ': self.integ,
-                'ssthresh': self.ssthresh,
-                'lossCredit': self.lossCredit}
+                'targetRTT': self.targetRTT,
+                'slowStart': int(self.slowStart)}
