@@ -27,15 +27,15 @@ args = parser.parse_args()
 
 
 def serverDist(mean):
-    #return mean
+    return mean
     #return npr.exponential(mean)
     #return npr.normal(0.25*mean, 0.1*mean) + npr.normal(0.75*mean, 0.1*mean)
-    return npr.uniform(0.5*mean, 1.5*mean)
+    #return npr.uniform(0.5*mean, 1.5*mean)
 
 def clientDist(mean):
-    #return mean
+    return mean
     #return npr.exponential(mean)
-    return npr.normal(mean, 0.1*mean)
+    #return npr.normal(mean, 0.1*mean)
 
 
 # First  define some global variables
@@ -55,7 +55,7 @@ class G:
     MIN_RTO = 2*BASE_RTT + 4*NUM_CLIENTS*MSS/MU
 
     MAX_PACKETS = max(2*MU*BASE_RTT/MSS, 2*NUM_CLIENTS)
-    COALESCE = 0.1*MU*BASE_RTT/MSS
+    COALESCE = 1#0.1*MU*BASE_RTT/MSS
 
     if False:
         NUM_SEND = 100000/NUM_CLIENTS
@@ -72,8 +72,8 @@ class G:
 
         #return MPCC(runInfo, G.MU, G.TARGET_RTT)
         #return PY_MPCC(runInfo, G.MU, G.TARGET_RTT)
-        #return CPID(runInfo, G.MU, G.BASE_RTT)
-        return PID(runInfo, G.MU, G.BASE_RTT, G.COALESCE)
+        return CPID(runInfo, G.MU, G.BASE_RTT, G.COALESCE/G.NUM_CLIENTS)
+        #return PID(runInfo, G.MU, G.BASE_RTT, G.COALESCE/G.NUM_CLIENTS)
         #return AIMD(runInfo, G.MU, G.TARGET_RTT)
         #return ExactCC(1.1*G.MU/G.NUM_CLIENTS, 1e6*bdp)
 

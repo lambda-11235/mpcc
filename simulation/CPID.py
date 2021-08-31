@@ -29,15 +29,17 @@ def convertRunInfo(runInfo):
     return info
 
 class CPID:
-    def __init__(self, runInfo, bottleneckRate, baseRTT):
+    def __init__(self, runInfo, bottleneckRate, baseRTT, coalesce):
         cfg = _pid.ffi.new("struct pid_config*")
 
         if _pid.ffi.typeof('SNum').cname == 'int64_t':
             cfg.bottleneckRate = int(bottleneckRate)
             cfg.baseRTT = int(baseRTT*_pid.lib.US_PER_SEC)
+            cfg.coalesce = math.ceil(coalesce)
         else:
             cfg.bottleneckRate = bottleneckRate
             cfg.baseRTT = baseRTT*_pid.lib.US_PER_SEC
+            cfg.coalesce = coalesce
 
         self.p = _pid.ffi.new("struct pid_control*")
         _pid.lib.pid_init(self.p, cfg, convertRunInfo(runInfo))
@@ -55,8 +57,8 @@ class CPID:
         _pid.lib.pid_on_loss(self.p, convertRunInfo(runInfo))
 
     def getDebugInfo(self):
-        return {'mrtt': self.p.mrtt/_pid.lib.US_PER_SEC,
+        return {'srtt': self.p.srtt/_pid.lib.US_PER_SEC,
                 'mu': self.p.mu,
                 'integ': self.p.integ,
-                'ssthresh': self.p.ssthresh,
+                'slowStart': int(self.p.slowStart),
                 'targetRTT': self.p.targetRTT/_pid.lib.US_PER_SEC}

@@ -26,6 +26,7 @@ struct pid_config {
     // Rates are in bytes/s, times are in us, and percentages are out of 100.
     SNum bottleneckRate;
     SNum baseRTT;
+    SNum coalesce;
 };
 
 
@@ -33,11 +34,13 @@ struct pid_control {
     // Rates are in bytes/s, times are in us, and percentages are out of 100.
     struct pid_config cfg;
 
-    SNum minRate, minRTT;
+    bool slowStart;
+
+    SNum minRate;
     SNum targetRTT;
-    SNum mrtt, devRTT;
-    SNum rateLastTime, rttLastTime;
-    SNum integ, rate, ssthresh;
+    SNum srtt, tau;
+    SNum rateLastTime, srttLastTime, targetLastTime;
+    SNum integ, rate;
     SNum mu, muDeliv, muTime;
 };
 

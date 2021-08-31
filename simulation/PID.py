@@ -33,7 +33,7 @@ class PID:
         self.targetRTT = baseRTT
 
         self.rateLastTime = runInfo.time
-        self.rttLastTime = runInfo.time
+        self.targetLastTime = runInfo.time
 
         self.integ = self.minRate
         self.rate = self.minRate
@@ -53,7 +53,7 @@ class PID:
 
 
     def ack(self, runInfo):
-        self.minRate = min(self.bottleneckRate/128, runInfo.mss/self.targetRTT)
+        self.minRate = min(self.bottleneckRate/128, runInfo.mss/self.baseRTT)
         self.tau = max(4*self.baseRTT, runInfo.mss/self.bottleneckRate)
 
         self.updateSRTT(runInfo)
@@ -85,35 +85,6 @@ class PID:
         self.updateRate(runInfo)
 
 
-    def updateSRTT(self, runInfo):
-        dt = runInfo.time - self.srttLastTime
-
-        diffSRTT = runInfo.lastRTT - self.srtt
-        diffSRTT *= min(1, dt/self.baseRTT)
-
-        if diffSRTT != 0:
-            self.srttLastTime = runInfo.time
-
-            self.srtt += diffSRTT
-
-
-    def updateTargetRTT(self, runInfo):
-        dt = runInfo.time - self.rttLastTime
-
-        nt = self.baseRTT
-        nt += (self.coalesce + runInfo.hops)*runInfo.mss/self.bottleneckRate
-        nt += runInfo.mss/self.mu
-
-        diffTargetRTT = (nt - self.targetRTT)
-        diffTargetRTT *= min(1, dt/self.tau)
-
-        if diffTargetRTT != 0:
-            self.rttLastTime = runInfo.time
-
-            self.targetRTT += diffTargetRTT
-            self.targetRTT = max(self.baseRTT, self.targetRTT)
-        
-
     def updateRate(self, runInfo):
         dt = runInfo.time - self.rateLastTime
 
@@ -137,6 +108,35 @@ class PID:
 
         self.integ = clamp(self.integ, self.minRate, 2*self.bottleneckRate)
         self.rate = clamp(self.rate, self.minRate, 2*self.bottleneckRate)
+
+
+    def updateSRTT(self, runInfo):
+        dt = runInfo.time - self.srttLastTime
+
+        diffSRTT = runInfo.lastRTT - self.srtt
+        diffSRTT *= min(1, dt/self.baseRTT)
+
+        if diffSRTT != 0:
+            self.srttLastTime = runInfo.time
+
+            self.srtt += diffSRTT
+
+
+    def updateTargetRTT(self, runInfo):
+        dt = runInfo.time - self.targetLastTime
+
+        nt = self.baseRTT
+        nt += self.coalesce*runInfo.mss/self.rate
+        nt += runInfo.hops*runInfo.mss/self.bottleneckRate
+
+        diffTargetRTT = (nt - self.targetRTT)
+        diffTargetRTT *= min(1, dt/self.tau)
+
+        if diffTargetRTT != 0:
+            self.targetLastTime = runInfo.time
+
+            self.targetRTT += diffTargetRTT
+            self.targetRTT = max(self.baseRTT, self.targetRTT)
 
 
     def getDebugInfo(self):

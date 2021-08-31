@@ -4,6 +4,7 @@
 
 void pid_update(struct pid_control *self, struct runtime_info *info);
 void pid_update_rate(struct pid_control *self, struct runtime_info *info);
+void pid_update_srtt(struct pid_control *self, struct runtime_info *info);
 void pid_update_targetRTT(struct pid_control *self, struct runtime_info *info);
 
 
@@ -62,20 +63,21 @@ void pid_reset(struct pid_control *self, struct runtime_info *info) {
                             info->mss*US_PER_SEC/self->cfg.baseRTT);
     self->minRate = pid_max(minDelta, self->minRate);
 
-    self->minRTT = info->lastRTT;
+    self->srtt = info->lastRTT;
+    self->srttLastTime = info->time;
+
+    self->tau = pid_max(4*self->cfg.baseRTT,
+                        info->mss*US_PER_SEC/self->cfg.bottleneckRate);
 
     self->targetRTT = self->cfg.baseRTT
         + info->hops*info->mss/self->minRate;
 
-    self->mrtt = info->lastRTT;
-    self->devRTT = 0;
-
     self->rateLastTime = info->time;
-    self->rttLastTime = info->time;
+    self->targetLastTime = info->time;
 
     self->integ = self->minRate;
     self->rate = self->minRate;
-    self->ssthresh = self->cfg.bottleneckRate;
+    self->slowStart = true;
 
     self->mu = self->cfg.bottleneckRate;
     self->muDeliv = 0;
@@ -99,24 +101,20 @@ void pid_on_ack(struct pid_control *self, struct runtime_info *info) {
     SNum deliv, est;
 
     self->minRate = pid_min(self->cfg.bottleneckRate/128,
-                            info->mss*US_PER_SEC/self->targetRTT);
+                            info->mss*US_PER_SEC/self->cfg.baseRTT);
     self->minRate = pid_max(minDelta, self->minRate);
 
-    self->minRTT = pid_min(self->minRTT, info->lastRTT);
+    self->tau = pid_max(4*self->cfg.baseRTT,
+                        info->mss*US_PER_SEC/self->cfg.bottleneckRate);
 
-    if (info->inflight < 8)
-        self->mrtt = info->lastRTT;
-    else
-        self->mrtt = pid_wma(self->mrtt, info->lastRTT);
-
-    self->devRTT = pid_wma(self->devRTT, pid_abs(info->lastRTT - self->mrtt));
+    pid_update_srtt(self, info);
 
 
     deliv = info->delivered - self->muDeliv;
-    if (info->time > self->muTime + self->targetRTT && deliv >= 4) {
+    if (info->time > self->muTime + self->targetRTT && deliv > 0) {
         est = deliv*info->mss*US_PER_SEC/(info->time - self->muTime);
 
-        if (self->mrtt > self->targetRTT)
+        if (self->srtt > self->targetRTT)
             self->mu = est;
         else
             self->mu = pid_max(self->mu, est);
@@ -128,76 +126,88 @@ void pid_on_ack(struct pid_control *self, struct runtime_info *info) {
     }
 
 
-    if (self->mrtt > self->targetRTT) {
-        self->ssthresh = self->mu/2;
-    }
-
     pid_update(self, info);
 }
 
 
 void pid_on_loss(struct pid_control *self, struct runtime_info *info) {
-    self->ssthresh = pid_min(self->ssthresh, self->mu/2);
+    self->slowStart = false;
     pid_update(self, info);
 }
 
 
 void pid_update(struct pid_control *self, struct runtime_info *info) {
-    pid_update_rate(self, info);
     pid_update_targetRTT(self, info);
+    pid_update_rate(self, info);
 }
 
 
 void pid_update_rate(struct pid_control *self, struct runtime_info *info) {
-    SNum dt, err, tau;
+    SNum dt, err;
     SNum kpNum, kpDen, kiNum, kiDen;
     SNum diffInteg;
 
-    err = self->targetRTT - self->mrtt;
-    tau = pid_max(4*self->targetRTT, info->mss*US_PER_SEC/self->mu);
-
-    kpNum = 2*self->mu;
-    kpDen = tau;
-
-    kiNum = self->mu;
-    kiDen = pid_sqr(tau);
-
     dt = info->time - self->rateLastTime;
 
-    if (self->rate < self->ssthresh)
-        diffInteg = self->rate*dt/tau;
+    err = self->targetRTT - info->lastRTT;
+
+    kpNum = 2*self->mu;
+    kpDen = self->tau;
+
+    kiNum = self->mu;
+    kiDen = pid_sqr(self->tau);
+
+    if (self->slowStart)
+        diffInteg = self->rate*pid_min(self->tau, dt)/self->tau;
     else
-        diffInteg = kiNum*err*dt/kiDen;
+        diffInteg = kiNum*err*pid_min(self->tau, dt)/kiDen;
 
     if (diffInteg != 0) {
         self->rateLastTime = info->time;
 
         self->integ += diffInteg;
         self->rate = kpNum*err/kpDen + self->integ;
+    }
 
-        self->integ = pid_clamp(self->integ, self->minRate, 2*self->cfg.bottleneckRate);
-        self->rate = pid_clamp(self->rate, self->minRate, 2*self->cfg.bottleneckRate);
+    self->integ = pid_clamp(self->integ, self->minRate, 2*self->cfg.bottleneckRate);
+    self->rate = pid_clamp(self->rate, self->minRate, 2*self->cfg.bottleneckRate);
+}
+
+
+void pid_update_srtt(struct pid_control *self, struct runtime_info *info) {
+    SNum dt;
+    SNum diffSRTT;
+
+    dt = info->time - self->srttLastTime;
+
+    diffSRTT = info->lastRTT - self->srtt;
+    diffSRTT = diffSRTT*pid_min(self->cfg.baseRTT, dt)/self->cfg.baseRTT;
+
+    if (diffSRTT != 0) {
+        self->srttLastTime = info->time;
+        self->srtt += diffSRTT;
     }
 }
 
 
 void pid_update_targetRTT(struct pid_control *self, struct runtime_info *info) {
-    SNum dt, nt, tau;
+    SNum dt, nt;
     SNum diffTargetRTT;
 
-    tau = pid_max(4*self->targetRTT, info->mss*US_PER_SEC/self->mu);
-    dt = info->time - self->rttLastTime;
+    dt = info->time - self->targetLastTime;
 
     nt = self->cfg.baseRTT;
+    nt += self->cfg.coalesce*info->mss*US_PER_SEC/self->rate;
     nt += info->hops*info->mss*US_PER_SEC/self->cfg.bottleneckRate;
-    nt += info->mss*US_PER_SEC/self->mu;
-    diffTargetRTT = (nt - self->targetRTT)*dt/tau;
+
+    diffTargetRTT = (nt - self->targetRTT)*pid_min(self->tau, dt)/self->tau;
 
 
     if (diffTargetRTT != 0) {
-        self->rttLastTime = info->time;
+        self->targetLastTime = info->time;
 
         self->targetRTT += diffTargetRTT;
-        self->targetRTT = pid_max(self->cfg.baseRTT, self->targetRTT);
     }
+
+    self->targetRTT = pid_max(self->cfg.baseRTT, self->targetRTT);
 }
