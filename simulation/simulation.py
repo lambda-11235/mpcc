@@ -47,7 +47,7 @@ class G:
     MSS = 1500
     MU = 100*MSS
 
-    BASE_RTT = 5.0#e-2
+    BASE_RTT = 5.0e-2
 
     MAX_SEQ = int(1000*MU*BASE_RTT/MSS)
 
@@ -57,14 +57,14 @@ class G:
     MAX_PACKETS = max(2*MU*BASE_RTT/MSS, 2*NUM_CLIENTS)
     COALESCE = 1#0.1*MU*BASE_RTT/MSS
 
-    if False:
+    if True:
         NUM_SEND = 100000/NUM_CLIENTS
         SIM_TIME = None
-        START_TIME_OFFSETS = 0
+        START_TIME_OFFSETS = 4*BASE_RTT
     else:
         NUM_SEND = None
         SIM_TIME = 1000*BASE_RTT
-        START_TIME_OFFSETS = SIM_TIME/(4*NUM_CLIENTS)
+        START_TIME_OFFSETS = 4*BASE_RTT
 
     def makeCC():
         runInfo = RuntimeInfo(0, G.BASE_RTT, 0, 0, G.MSS, 1)
@@ -75,7 +75,7 @@ class G:
         return CPID(runInfo, G.MU, G.BASE_RTT, G.COALESCE/G.NUM_CLIENTS)
         #return PID(runInfo, G.MU, G.BASE_RTT, G.COALESCE/G.NUM_CLIENTS)
         #return AIMD(runInfo, G.MU, G.TARGET_RTT)
-        #return ExactCC(1.1*G.MU/G.NUM_CLIENTS, 1e6*bdp)
+        #return ExactCC(0.9*G.MU/G.NUM_CLIENTS, 1e6*bdp)
 
 
 class Statistics(object):

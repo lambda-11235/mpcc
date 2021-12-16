@@ -48,13 +48,13 @@ class PID:
         return self.rate
 
     def cwnd(self, runInfo):
-        bdp = int(self.rate*self.targetRTT/runInfo.mss)
-        return 1 + 2*bdp
+        bdp = int(self.bottleneckRate*self.targetRTT/runInfo.mss)
+        return max(4, 2*bdp)
 
 
     def ack(self, runInfo):
-        self.minRate = min(self.bottleneckRate/128, runInfo.mss/self.baseRTT)
-        self.tau = max(4*self.baseRTT, runInfo.mss/self.bottleneckRate)
+        self.minRate = min(self.bottleneckRate/128, runInfo.mss/self.srtt)
+        self.tau = max(4*self.srtt, runInfo.mss/self.bottleneckRate)
 
         self.updateSRTT(runInfo)
 
@@ -71,6 +71,9 @@ class PID:
 
             self.muDeliv = runInfo.delivered
             self.muTime = runInfo.time
+
+        if self.srtt > 2*self.targetRTT:
+            self.slowStart = False
 
         self.update(runInfo)
 

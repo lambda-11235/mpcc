@@ -58,6 +58,7 @@ class CPID:
 
     def getDebugInfo(self):
         return {'srtt': self.p.srtt/_pid.lib.US_PER_SEC,
+                'tau': self.p.tau/_pid.lib.US_PER_SEC,
                 'mu': self.p.mu,
                 'integ': self.p.integ,
                 'slowStart': int(self.p.slowStart),

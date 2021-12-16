@@ -1,8 +1,13 @@
 
+#define PID_KERNEL_MODE
+
 #include <linux/module.h>
 
 #include <stdbool.h>
+
+#ifndef PID_KERNEL_MODE
 #include <stdint.h>
+#endif
 
 
 #ifndef PID_H
@@ -27,6 +32,7 @@ struct pid_config {
     SNum bottleneckRate;
     SNum baseRTT;
     SNum coalesce;
+    SNum maxCWND;
 };
 
 
@@ -39,7 +45,7 @@ struct pid_control {
     SNum minRate;
     SNum targetRTT;
     SNum srtt, tau;
-    SNum rateLastTime, srttLastTime, targetLastTime;
+    SNum rateLastTime, srttLastTime, targetLastTime, ssLastTime;
     SNum integ, rate;
     SNum mu, muDeliv, muTime;
 };
