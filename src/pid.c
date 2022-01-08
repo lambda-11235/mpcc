@@ -111,7 +111,7 @@ SNum pid_cwnd(struct pid_control *self, struct runtime_info *info) {
     else
         bdp = pid_div(self->cfg.bottleneckRate*self->targetRTT, info->mss*US_PER_SEC);
 
-    return pid_max(4, 2*bdp);
+    return pid_max(4, bdp);
 }
 
 

@@ -20,7 +20,10 @@ class CongControl:
         return 1.0
 
     def cwnd(self, runInfo):
-        return 1
+        """
+        Return 0 for unlimited.
+        """
+        return 0
 
     def ack(self, runInfo):
         pass

@@ -16,9 +16,12 @@
 #include "../../src/pid.h"
 
 
+#define PRINT_DELAY (NSEC_PER_SEC/10)
+
+
 struct pid_config pid_default_config = {
-    .bottleneckRate = ((SNum) 20000) << 17,
-    .baseRTT = 20,
+    .bottleneckRate = ((SNum) 20) << 27,
+    .baseRTT = 10,
     .coalesce = 3,
     .maxCWND = MAX_TCP_WINDOW
 };
@@ -26,6 +29,8 @@ struct pid_config pid_default_config = {
 struct control {
     struct pid_control model;
     struct runtime_info info;
+    u64 last_set_print_time;
+    u64 last_report_print_time;
 };
 
 
@@ -38,18 +43,22 @@ inline struct control* get_control(struct sock *sk) {
 inline void set_rate(struct sock *sk) {
 	struct control *ctl = get_control(sk);
 	struct tcp_sock *tp = tcp_sk(sk);
+        u64 now = ktime_get_ns();
 	u32 max_cwnd = min_t(u32, MAX_TCP_WINDOW, tp->snd_cwnd_clamp);
         u64 rate, cwnd;
 
-        ctl->info.time = ktime_get_ns()/NSEC_PER_USEC;
+        ctl->info.time = now/NSEC_PER_USEC;
 
 	rate = pid_pacing_rate(&ctl->model, &ctl->info);
 	cwnd = pid_cwnd(&ctl->model, &ctl->info);
 
 	sk->sk_pacing_rate = min_t(u64, max_t(u64, 1, rate), sk->sk_max_pacing_rate);
-	tp->snd_cwnd = min_t(u64, max_t(u64, 1, cwnd), max_cwnd);
+        tp->snd_cwnd = min_t(u64, max_t(u64, 1, cwnd), max_cwnd);
 
-        printk("pid_cc: Setting sk_pacing_rate = %u, snd_cwnd = %u\n", sk->sk_pacing_rate, tp->snd_cwnd);
+        if (now > ctl->last_set_print_time + PRINT_DELAY) {
+            ctl->last_set_print_time = now;
+            printk("pid_cc: Setting sk_pacing_rate = %u, snd_cwnd = %u\n", sk->sk_pacing_rate, tp->snd_cwnd);
+        }
 }
 
 
@@ -58,6 +67,7 @@ void pid_cc_init(struct sock *sk)
 	struct control **ctlptr = inet_csk_ca(sk);
 	struct tcp_sock *tp = tcp_sk(sk);
 	struct control *ctl = kzalloc(sizeof(struct control), GFP_KERNEL);
+        u64 now = ktime_get_ns();
 
 	if (ctl == NULL) {
 		*ctlptr = NULL;
@@ -69,7 +79,10 @@ void pid_cc_init(struct sock *sk)
 	tp->snd_ssthresh = TCP_INFINITE_SSTHRESH;
 	sk->sk_pacing_status = SK_PACING_NEEDED;
 
-        ctl->info.time = ktime_get_ns()/NSEC_PER_USEC;
+        ctl->last_set_print_time = now;
+        ctl->last_report_print_time = now;
+
+        ctl->info.time = now/NSEC_PER_USEC;
         ctl->info.lastRTT = pid_default_config.baseRTT;
         ctl->info.delivered = 0;
         ctl->info.inflight = 0;
@@ -88,6 +101,8 @@ void pid_cc_release(struct sock *sk)
 	if (ctl != NULL) {
 		pid_release(&ctl->model);
 	}
+
+        kvfree(ctl);
 
 	*ctlptr = NULL;
 }
@@ -124,9 +139,12 @@ void pid_cc_main(struct sock *sk, const struct rate_sample *rs)
 {
 	struct control *ctl = get_control(sk);
 	struct tcp_sock *tp = tcp_sk(sk);
+        u64 now;
 
 	if (ctl != NULL && rs->rtt_us > 0) {
-            ctl->info.time = ktime_get_ns()/NSEC_PER_USEC;
+            now = ktime_get_ns();
+
+            ctl->info.time = now/NSEC_PER_USEC;
             ctl->info.lastRTT = tp->rack.rtt_us;
             ctl->info.delivered = tp->delivered;
             ctl->info.inflight = tp->packets_out;
@@ -136,8 +154,11 @@ void pid_cc_main(struct sock *sk, const struct rate_sample *rs)
             pid_on_ack(&ctl->model, &ctl->info);
             set_rate(sk);
 
-            printk(KERN_INFO "pid_cc: rate = %lld, integ = %lld, target_rtt = %lld, srtt = %lld, base_rtt = %lld\n",
-                   ctl->model.rate, ctl->model.integ, ctl->model.targetRTT, ctl->model.srtt, ctl->model.cfg.baseRTT);
+            if (now > ctl->last_report_print_time + PRINT_DELAY) {
+                ctl->last_report_print_time = now;
+                printk(KERN_INFO "pid_cc: time = %lld ms, rate = %lld, integ = %lld, target_rtt = %lld, srtt = %lld, base_rtt = %lld\n",
+                       now/NSEC_PER_MSEC, ctl->model.rate, ctl->model.integ, ctl->model.targetRTT, ctl->model.srtt, ctl->model.cfg.baseRTT);
+            }
         }
 }
 

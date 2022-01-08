@@ -40,7 +40,7 @@ def clientDist(mean):
 
 # First  define some global variables
 class G:
-    NUM_CLIENTS = 40
+    NUM_CLIENTS = 4
 
     ALPHA = 0.9
 
