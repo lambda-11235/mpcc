@@ -29,18 +29,18 @@ args = parser.parse_args()
 def serverDist(mean):
     return mean
     #return npr.exponential(mean)
-    #return npr.normal(0.25*mean, 0.1*mean) + npr.normal(0.75*mean, 0.1*mean)
+    #return npr.normal(mean, 0.01*mean)
     #return npr.uniform(0.5*mean, 1.5*mean)
 
 def clientDist(mean):
     return mean
     #return npr.exponential(mean)
-    #return npr.normal(mean, 0.1*mean)
+    #return npr.normal(mean, 0.01*mean)
 
 
 # First  define some global variables
 class G:
-    NUM_CLIENTS = 4
+    NUM_CLIENTS = 12
 
     ALPHA = 0.9
 
@@ -57,13 +57,13 @@ class G:
     MAX_PACKETS = max(2*MU*BASE_RTT/MSS, 2*NUM_CLIENTS)
     COALESCE = 1#0.1*MU*BASE_RTT/MSS
 
-    if True:
-        NUM_SEND = 100000/NUM_CLIENTS
+    if False:
+        NUM_SEND = 100000
         SIM_TIME = None
         START_TIME_OFFSETS = 4*BASE_RTT
     else:
         NUM_SEND = None
-        SIM_TIME = 1000*BASE_RTT
+        SIM_TIME = 100000*BASE_RTT
         START_TIME_OFFSETS = 4*BASE_RTT
 
     def makeCC():
@@ -72,10 +72,12 @@ class G:
 
         #return MPCC(runInfo, G.MU, G.TARGET_RTT)
         #return PY_MPCC(runInfo, G.MU, G.TARGET_RTT)
-        return CPID(runInfo, G.MU, G.BASE_RTT, G.COALESCE/G.NUM_CLIENTS)
+        #return CPID(runInfo, G.MU, G.BASE_RTT, G.COALESCE/G.NUM_CLIENTS)
         #return PID(runInfo, G.MU, G.BASE_RTT, G.COALESCE/G.NUM_CLIENTS)
-        #return AIMD(runInfo, G.MU, G.TARGET_RTT)
-        #return ExactCC(0.9*G.MU/G.NUM_CLIENTS, 1e6*bdp)
+        #return AIMD(runInfo, G.MU, 0.07)
+        #return ExactCC(G.MU/G.NUM_CLIENTS, bdp/G.NUM_CLIENTS)
+
+        return CPID(runInfo, G.MU, G.BASE_RTT, 1.33e-3)
 
 
 class Statistics(object):
@@ -116,12 +118,12 @@ class Server(object):
         self.action = env.process(self.run())
 
         self.done = done
-        self.activeClients = G.NUM_CLIENTS
         self.totalDelivered = 0
+        self.totalSent = 0
 
     def run(self):
         # Generate packets at rate lambda and store in queue
-        while self.activeClients > 0:
+        while True:
             if G.SIM_TIME is None:
                 p1 = 0
             else:
@@ -130,7 +132,7 @@ class Server(object):
             if G.NUM_SEND is None:
                 p2 = 0
             else:
-                p2 = 100*self.totalDelivered/(G.NUM_CLIENTS*G.NUM_SEND)
+                p2 = 100*self.totalSent/G.NUM_SEND
                 
             print(f"{max(p1, p2):.2f}%", end='\r')
 
@@ -149,13 +151,14 @@ class Server(object):
 
             if G.SIM_TIME is not None and env.now > G.SIM_TIME:
                 self.done.succeed()
-
-        self.done.succeed()
+            elif G.NUM_SEND is not None and self.totalSent > G.NUM_SEND:
+                self.done.succeed()
 
     def send(self, packet):
         yield self.env.timeout(G.BASE_RTT)
+        self.totalSent += 1
 
-        if len(self.queue) < G.MAX_PACKETS:
+        if len(self.queue) + len(self.coalesceQueue) < G.MAX_PACKETS:
             self.coalesceQueue.append(packet)
 
 
@@ -185,7 +188,7 @@ class Client(object):
 
     def run(self):
         # Generate packets at rate lambda and store in queue
-        while G.NUM_SEND is None or self.delivered < G.NUM_SEND:
+        while True:
             runInfo = RuntimeInfo(self.env.now, self.lastRTT,
                                   self.delivered, self.inflight,
                                   G.MSS, 1)
@@ -201,8 +204,6 @@ class Client(object):
                 seq = self.queue.pop(0)
                 packet = Packet(self.env.now, self, seq)
                 self.env.process(self.server.send(packet))
-
-        self.server.activeClients -= 1
 
 
     def ack(self, packet):

@@ -9,13 +9,13 @@ ccflags-y += -I$(shell realpath $(SRC_DIR)) -DLINUX_KERNEL
 ccflags-y += -g -O0 -DDEBUG
 
 all:
-	make -C "/lib/modules/$(shell uname -r)/build" M=$(PWD) modules
-	#make -C `nix-build -E '(import <nixpkgs> {}).linux.dev' --no-out-link`/lib/modules/*/build M=$(PWD) modules
+	#make -C "/lib/modules/$(shell uname -r)/build" M=$(PWD) modules
+	make -C `nix-build -E '(import <nixpkgs> {}).linux.dev' --no-out-link`/lib/modules/*/build M=$(PWD) modules
 	#make -C `nix-build -E '(import <nixpkgs> {}).linux_latest.dev' --no-out-link`/lib/modules/*/build M=$(PWD) modules
 
 clean:
-	make -C "/lib/modules/$(shell uname -r)/build" M=$(PWD) clean
-	#make -C `nix-build -E '(import <nixpkgs> {}).linux.dev' --no-out-link`/lib/modules/*/build M=$(PWD) clean
+	#make -C "/lib/modules/$(shell uname -r)/build" M=$(PWD) clean
+	make -C `nix-build -E '(import <nixpkgs> {}).linux.dev' --no-out-link`/lib/modules/*/build M=$(PWD) clean
 	#make -C `nix-build -E '(import <nixpkgs> {}).linux_latest.dev' --no-out-link`/lib/modules/*/build M=$(PWD) clean
 
 start:

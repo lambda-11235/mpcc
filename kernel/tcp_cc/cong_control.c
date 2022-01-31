@@ -20,9 +20,9 @@
 
 
 struct pid_config pid_default_config = {
-    .bottleneckRate = ((SNum) 20) << 27,
-    .baseRTT = 10,
-    .coalesce = 3,
+    .bottleneckRate = ((SNum) 1) << 27,
+    .baseRTT = 200,
+    .rttGain = 1,
     .maxCWND = MAX_TCP_WINDOW
 };
 
@@ -57,7 +57,7 @@ inline void set_rate(struct sock *sk) {
 
         if (now > ctl->last_set_print_time + PRINT_DELAY) {
             ctl->last_set_print_time = now;
-            printk("pid_cc: Setting sk_pacing_rate = %u, snd_cwnd = %u\n", sk->sk_pacing_rate, tp->snd_cwnd);
+            printk("pid_cc: Setting sk_pacing_rate = %lu, snd_cwnd = %u\n", sk->sk_pacing_rate, tp->snd_cwnd);
         }
 }
 

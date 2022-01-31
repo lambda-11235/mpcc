@@ -1,5 +1,5 @@
 
-#define PID_KERNEL_MODE
+//#define PID_KERNEL_MODE
 
 #include <linux/module.h>
 
@@ -31,7 +31,7 @@ struct pid_config {
     // Rates are in bytes/s, times are in us, and percentages are out of 100.
     SNum bottleneckRate;
     SNum baseRTT;
-    SNum coalesce;
+    SNum rttGain;
     SNum maxCWND;
 };
 

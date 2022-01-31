@@ -54,8 +54,8 @@ for client in data['CLIENT_DATA']:
         IQRs.append(q3 - q1)
         rtt99.append(q4)
 
-    if len(client['targetRTT']) > 0:
-        avgTargets.append(np.mean(client['targetRTT']))
+    #if len(client['targetRTT']) > 0:
+    #    avgTargets.append(np.mean(client['targetRTT']))
 
 
 delivered = np.array(delivered)
@@ -81,4 +81,4 @@ print(f"Max of Client RTT 99th: {np.max(rtt99)}")
 
 print()
 
-print(f"Median of Client Average Target RTT: {np.median(avgTargets)}")
+#print(f"Median of Client Average Target RTT: {np.median(avgTargets)}")
