@@ -33,6 +33,7 @@ struct pid_config {
     SNum baseRTT;
     SNum rttGain;
     SNum maxCWND;
+    SNum maxFlows;
 };
 
 
@@ -44,7 +45,7 @@ struct pid_control {
 
     SNum minRate;
     SNum targetRTT;
-    SNum srtt, tau;
+    Num srtt, hpRTT, tau;
     SNum rateLastTime, srttLastTime, targetLastTime, ssLastTime;
     SNum integ, rate;
     SNum mu, muDeliv, muTime;

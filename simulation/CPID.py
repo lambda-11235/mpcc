@@ -29,17 +29,19 @@ def convertRunInfo(runInfo):
     return info
 
 class CPID:
-    def __init__(self, runInfo, bottleneckRate, baseRTT, rttGain):
+    def __init__(self, runInfo, bottleneckRate, baseRTT, rttGain, maxFlows):
         cfg = _pid.ffi.new("struct pid_config*")
 
         if _pid.ffi.typeof('SNum').cname == 'int64_t':
             cfg.bottleneckRate = int(bottleneckRate)
             cfg.baseRTT = int(baseRTT*_pid.lib.US_PER_SEC)
             cfg.rttGain = int(rttGain*_pid.lib.US_PER_SEC)
+            cfg.maxFlows = int(maxFlows)
         else:
             cfg.bottleneckRate = bottleneckRate
             cfg.baseRTT = baseRTT*_pid.lib.US_PER_SEC
             cfg.rttGain = rttGain
+            cfg.rttFlows = maxFlows
 
         self.p = _pid.ffi.new("struct pid_control*")
         _pid.lib.pid_init(self.p, cfg, convertRunInfo(runInfo))

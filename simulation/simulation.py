@@ -63,7 +63,7 @@ class G:
         START_TIME_OFFSETS = 4*BASE_RTT
     else:
         NUM_SEND = None
-        SIM_TIME = 100000*BASE_RTT
+        SIM_TIME = 10000*BASE_RTT
         START_TIME_OFFSETS = 4*BASE_RTT
 
     def makeCC():
@@ -77,7 +77,7 @@ class G:
         #return AIMD(runInfo, G.MU, 0.07)
         #return ExactCC(G.MU/G.NUM_CLIENTS, bdp/G.NUM_CLIENTS)
 
-        return CPID(runInfo, G.MU, G.BASE_RTT, 1.33e-3)
+        return CPID(runInfo, G.MU, G.BASE_RTT, 1.33e-3, 100*G.NUM_CLIENTS)
 
 
 class Statistics(object):
