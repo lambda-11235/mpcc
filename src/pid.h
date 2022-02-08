@@ -45,10 +45,10 @@ struct pid_control {
 
     SNum minRate;
     SNum targetRTT;
-    Num srtt, hpRTT, tau;
+    SNum srtt, hpRTT, tau;
     SNum rateLastTime, srttLastTime, targetLastTime, ssLastTime;
     SNum integ, rate;
-    SNum mu, muDeliv, muTime;
+    SNum mu, goodput, gputDeliv, gputTime;
 };
 
 

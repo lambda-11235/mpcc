@@ -32,12 +32,13 @@ for k in data['CLIENT_DATA'][0].keys():
     plt.figure()
 
     for i, client in enumerate(data['CLIENT_DATA']):
-        ts = client['time']
-        ts = np.array(ts)/params['BASE_RTT']
+        if k in client:
+            ts = client['time']
+            ts = np.array(ts)/params['BASE_RTT']
 
-        vs = client[k]
+            vs = client[k]
 
-        plt.plot(ts, vs, label=f"Client {i}")
+            plt.plot(ts, vs, label=f"Client {i}")
 
     if k in {'rtt', 'mrtt'}:
         plt.plot((0, data['RUNTIME']/params['BASE_RTT']), (params['BASE_RTT'], params['BASE_RTT']),
