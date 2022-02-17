@@ -1,5 +1,5 @@
 
-//#define PID_KERNEL_MODE
+#define PID_KERNEL_MODE
 
 #include <linux/module.h>
 
@@ -31,7 +31,8 @@ struct pid_config {
     // Rates are in bytes/s, times are in us, and percentages are out of 100.
     SNum bottleneckRate;
     SNum baseRTT;
-    SNum rttGain;
+    SNum flowGainNum, flowGainDen;
+    SNum hopGainNum, hopGainDen;
     SNum maxCWND;
     SNum maxFlows;
 };
@@ -45,7 +46,7 @@ struct pid_control {
 
     SNum minRate;
     SNum targetRTT;
-    SNum srtt, hpRTT, tau;
+    SNum srtt, tau;
     SNum rateLastTime, srttLastTime, targetLastTime, ssLastTime;
     SNum integ, rate;
     SNum mu, goodput, gputDeliv, gputTime;

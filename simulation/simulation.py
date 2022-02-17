@@ -14,6 +14,7 @@ from MPCC import MPCC
 from PY_MPCC import PY_MPCC
 from CPID import CPID
 from PID import PID
+from PID_CWND import PID_CWND
 
 #matplotlib.use('TkAgg')
 
@@ -40,7 +41,7 @@ def clientDist(mean):
 
 # First  define some global variables
 class G:
-    NUM_CLIENTS = 12
+    NUM_CLIENTS = 1
 
     ALPHA = 0.9
 
@@ -54,7 +55,7 @@ class G:
     #MIN_RTO = 0
     MIN_RTO = 2*BASE_RTT + 4*NUM_CLIENTS*MSS/MU
 
-    MAX_PACKETS = max(2*MU*BASE_RTT/MSS, 2*NUM_CLIENTS)
+    MAX_PACKETS = 100*max(MU*BASE_RTT/MSS, NUM_CLIENTS)
     COALESCE = 1#0.1*MU*BASE_RTT/MSS
 
     if False:
@@ -72,12 +73,11 @@ class G:
 
         #return MPCC(runInfo, G.MU, G.TARGET_RTT)
         #return PY_MPCC(runInfo, G.MU, G.TARGET_RTT)
-        #return CPID(runInfo, G.MU, G.BASE_RTT, G.COALESCE/G.NUM_CLIENTS)
-        #return PID(runInfo, G.MU, G.BASE_RTT, G.COALESCE/G.NUM_CLIENTS)
+        return CPID(runInfo, G.MU, G.BASE_RTT, 1.0e-2, G.MSS/G.MU, 10*G.NUM_CLIENTS)
+        #return PID(runInfo, G.MU, G.BASE_RTT, 1.0e-2, G.MSS/G.MU)
+        #return PID_CWND(runInfo, G.MU, G.BASE_RTT, 1.0e-2, G.MSS/G.MU)
         #return AIMD(runInfo, G.MU, 0.07)
         #return ExactCC(G.MU/G.NUM_CLIENTS, bdp/G.NUM_CLIENTS)
-
-        return CPID(runInfo, G.MU, G.BASE_RTT, 1.33e-3, 100*G.NUM_CLIENTS)
 
 
 class Statistics(object):
@@ -141,7 +141,7 @@ class Server(object):
 
             yield self.env.timeout(t)
 
-            if len(self.coalesceQueue) > G.COALESCE:
+            if len(self.coalesceQueue) >= G.COALESCE:
                 while len(self.coalesceQueue) > 0:
                     self.queue.append(self.coalesceQueue.pop(0))
 

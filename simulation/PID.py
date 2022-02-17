@@ -19,10 +19,11 @@ def clamp(x, minimum, maximum):
 
 
 class PID:
-    def __init__(self, runInfo, bottleneckRate, baseRTT, coalesce):
+    def __init__(self, runInfo, bottleneckRate, baseRTT, flowGain, hopGain):
         self.bottleneckRate = bottleneckRate
         self.baseRTT = baseRTT
-        self.coalesce = coalesce
+        self.flowGain = flowGain
+        self.hopGain = hopGain
 
         self.minRate = min(self.bottleneckRate/128, runInfo.mss/self.baseRTT)
 
@@ -39,6 +40,7 @@ class PID:
         self.rate = self.minRate
         self.slowStart = True
 
+        self.goodput = self.minRate
         self.mu = self.minRate
         self.muDeliv = 0
         self.muTime = runInfo.time
@@ -48,8 +50,7 @@ class PID:
         return self.rate
 
     def cwnd(self, runInfo):
-        bdp = int(self.bottleneckRate*self.targetRTT/runInfo.mss)
-        return max(4, 2*bdp)
+        return 2 + self.integ*self.targetRTT/runInfo.mss
 
 
     def ack(self, runInfo):
@@ -67,12 +68,13 @@ class PID:
             else:
                 self.mu = max(self.mu, est)
 
+            self.goodput = clamp(est, self.minRate, 2*self.bottleneckRate)
             self.mu = clamp(self.mu, self.minRate, 2*self.bottleneckRate)
 
             self.muDeliv = runInfo.delivered
             self.muTime = runInfo.time
 
-        if self.srtt > 2*self.targetRTT:
+        if self.srtt > self.targetRTT:
             self.slowStart = False
 
         self.update(runInfo)
@@ -80,7 +82,6 @@ class PID:
 
     def loss(self, runInfo):
         self.slowStart = False
-        self.update(runInfo)
 
 
     def update(self, runInfo):
@@ -129,8 +130,8 @@ class PID:
         dt = runInfo.time - self.targetLastTime
 
         nt = self.baseRTT
-        nt += self.coalesce*runInfo.mss/self.rate
-        nt += runInfo.hops*runInfo.mss/self.bottleneckRate
+        nt += self.flowGain*np.sqrt(self.bottleneckRate/self.goodput)
+        nt += self.hopGain*runInfo.hops
 
         diffTargetRTT = (nt - self.targetRTT)
         diffTargetRTT *= min(1, dt/self.tau)
@@ -145,6 +146,7 @@ class PID:
     def getDebugInfo(self):
         return {'srtt': self.srtt,
                 'tau': self.tau,
+                'goodput': self.goodput,
                 'mu': self.mu,
                 'integ': self.integ,
                 'targetRTT': self.targetRTT,

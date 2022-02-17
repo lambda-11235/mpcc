@@ -22,7 +22,8 @@
 struct pid_config pid_default_config = {
     .bottleneckRate = ((SNum) 1) << 27,
     .baseRTT = 200,
-    .rttGain = 4,
+    .flowGainNum = 200, .flowGainDen = 1000,
+    .hopGainDen = 0, .hopGainDen = 1,
     .maxCWND = MAX_TCP_WINDOW,
     .maxFlows = 256
 };

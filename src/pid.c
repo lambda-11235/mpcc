@@ -96,7 +96,6 @@ void pid_reset(struct pid_control *self, struct runtime_info *info) {
                             self->cfg.bottleneckRate/(2*self->cfg.maxFlows));
 
     self->srtt = info->lastRTT;
-    self->hpRTT = info->lastRTT;
     self->srttLastTime = info->time;
 
     self->tau = pid_max(4*self->cfg.baseRTT,
@@ -127,13 +126,11 @@ SNum pid_pacing_rate(struct pid_control *self, struct runtime_info *info) {
 
 SNum pid_cwnd(struct pid_control *self, struct runtime_info *info) {
     SNum bdp;
+    SNum mss = pid_max(minDelta, info->mss);
 
-    if (info->mss < 1)
-        bdp = self->cfg.bottleneckRate*self->targetRTT/US_PER_SEC;
-    else
-        bdp = pid_div(self->cfg.bottleneckRate*self->targetRTT, info->mss*US_PER_SEC);
+    bdp = pid_div(self->integ*self->targetRTT, mss*US_PER_SEC);
 
-    return pid_max(4, bdp);
+    return 2 + bdp;
 }
 
 
@@ -175,7 +172,10 @@ void pid_on_ack(struct pid_control *self, struct runtime_info *info) {
 void pid_on_loss(struct pid_control *self, struct runtime_info *info) {
     SNum dt, diffInteg;
 
+    self->slowStart = false;
+
     dt = info->time - self->rateLastTime;
+    self->tau = 2*self->srtt + 2*dt;
 
     if (dt < 1)
         return;
@@ -206,6 +206,7 @@ void pid_update_rate(struct pid_control *self, struct runtime_info *info) {
     SNum diffInteg;
 
     dt = info->time - self->rateLastTime;
+    self->tau = 2*self->srtt + 2*dt;
 
     if (dt < 1)
         return;
@@ -239,7 +240,6 @@ void pid_update_rate(struct pid_control *self, struct runtime_info *info) {
 void pid_update_srtt(struct pid_control *self, struct runtime_info *info) {
     SNum dt;
     SNum diffSRTT;
-    SNum diffHP;
 
     dt = info->time - self->srttLastTime;
 
@@ -249,39 +249,34 @@ void pid_update_srtt(struct pid_control *self, struct runtime_info *info) {
     diffSRTT = info->lastRTT - self->srtt;
     diffSRTT = pid_div(diffSRTT*pid_min(self->cfg.baseRTT, dt), self->cfg.baseRTT);
 
-    diffHP = pid_div(self->hpRTT*pid_max(0, self->tau - dt), self->tau) - self->hpRTT;
-    diffHP = pid_max(diffHP, info->lastRTT - self->hpRTT);
-
     if (diffSRTT != 0) {
         self->srttLastTime = info->time;
 
         self->srtt += diffSRTT;
-        self->hpRTT += diffHP;
 
         self->srtt = pid_max(minDelta, self->srtt);
     }
-
-    self->tau = 2*self->srtt + 2*info->mss*US_PER_SEC/self->mu;
 }
 
 
 void pid_update_targetRTT(struct pid_control *self, struct runtime_info *info) {
-    SNum dt, nt;
+    SNum dt, nt, N;
     SNum diffTargetRTT;
-    SNum gmean = self->rate;
-    int i;
-
-    for (i = 0; i < 10; i++)
-        gmean = (gmean + self->rate*(self->cfg.bottleneckRate/gmean))/2;
 
     dt = info->time - self->targetLastTime;
 
-    if (dt < 1 || gmean < 1)
+    if (dt < 1)
         return;
 
+    //N = pid_div(self->cfg.bottleneckRate, self->goodput);
+
     nt = self->cfg.baseRTT;
-    nt += self->cfg.rttGain*pid_div(self->cfg.bottleneckRate, self->goodput);
-    nt += self->cfg.rttGain*info->hops;
+
+    if (self->cfg.flowGainDen != 0)
+        nt += pid_div(self->cfg.flowGainNum*self->cfg.bottleneckRate,
+                      self->cfg.flowGainDen*self->goodput);
+    if (self->cfg.hopGainDen != 0)
+        nt += self->cfg.hopGainNum*info->hops/self->cfg.hopGainDen;
 
     diffTargetRTT = pid_div((nt - self->targetRTT)*pid_min(self->tau, dt), self->tau);
 
